@@ -24,6 +24,9 @@ async function send(messages) {
 }
 
 const TOTAL = 3000;
+// The server refuses anything above this, so the fixture must too or the
+// strategies get scored against a market that could never have happened.
+const CAP = 25000;
 
 async function main() {
   try {
@@ -58,18 +61,18 @@ async function main() {
   let round = 0;
   for (let clock = TOTAL - 20; clock > 150; clock -= 20) {
     round += 1;
-    price = Math.max(50, Math.round(price * (1 + (Math.random() * 0.16 - 0.045))));
+    price = Math.min(CAP, Math.max(50, Math.round(price * (1 + (Math.random() * 0.16 - 0.045)))));
     const tick = Math.sign(price - previous);
     previous = price;
 
     const batch = [
       { header: 'time', msg: String(clock) },
       { header: 'bestbid', isno: 1, msg: 'x', price: String(price - 2), qty: '40', displayName: someone(round), msg2: `<tr><td>${price - 2}</td><td>40</td></tr>` },
-      { header: 'bestask', isno: 1, msg: 'x', price: String(price + 3), qty: '12', displayName: someone(round + 3), msg2: `<tr><td>${price + 3}</td><td>12</td></tr>` },
+      { header: 'bestask', isno: 1, msg: 'x', price: String(Math.min(CAP, price + 3)), qty: '12', displayName: someone(round + 3), msg2: `<tr><td>${price + 3}</td><td>12</td></tr>` },
       // Print at whichever side was taken, so the resting quoter resolves the
       // way it does in a real book.
-      { header: 'lasttrade', isno: 1, price: String(tick >= 0 ? price + 3 : price - 2), qty: String(1 + Math.floor(Math.random() * 40)), lastTick: String(tick) },
-      { header: 'bidasklast', isno: 1, iTime: String(clock), msg: String(price - 2), msg1: String(price + 3), msg2: String(price) },
+      { header: 'lasttrade', isno: 1, price: String(tick >= 0 ? Math.min(CAP, price + 3) : price - 2), qty: String(1 + Math.floor(Math.random() * 40)), lastTick: String(tick) },
+      { header: 'bidasklast', isno: 1, iTime: String(clock), msg: String(price - 2), msg1: String(Math.min(CAP, price + 3)), msg2: String(price) },
     ];
 
     // A fill of your own: both legs in the same push, as the server sends them.

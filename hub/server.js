@@ -13,6 +13,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Tracker, unwrap } from './protocol.js';
 import { loadReplay } from './replay.js';
+import { StrategyBoard } from './strategies/engine.js';
+import { strategies } from './strategies/registry.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '..');
@@ -43,6 +45,13 @@ const MIME = {
 
 const tracker = new Tracker();
 const clients = new Set();
+
+// Every strategy runs all session, whether or not one is selected. Comparing
+// them only means anything if they all saw the same market from the same start.
+const board = new StrategyBoard(strategies);
+// Which strategy the user has picked. Selecting one changes what the panel
+// shows and nothing else: no order ever leaves this process.
+let selected = null;
 
 const state = {
   mode: replayFile ? 'replay' : 'live',
@@ -135,7 +144,24 @@ function emit(events) {
   for (const event of events) {
     absorb(event);
     broadcast(event);
+    board.handle(event);
   }
+  if (events.length) scheduleStrategyBroadcast();
+}
+
+// Strategy summaries carry a sparkline each, so they go out on a timer rather
+// than once per print.
+let strategyTimer = null;
+function scheduleStrategyBroadcast() {
+  if (strategyTimer !== null) return;
+  strategyTimer = setTimeout(() => {
+    strategyTimer = null;
+    broadcast(strategyEvent());
+  }, 500);
+}
+
+function strategyEvent() {
+  return { t: 'strategies', selected, board: board.summaries };
 }
 
 function statusEvent() {
@@ -300,6 +326,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === '/select' && req.method === 'POST') {
+    cors(res);
+    try {
+      const body = await readBody(req, 4096);
+      const { id } = JSON.parse(body);
+      // Selecting only changes what the panel shows. Nothing here places an
+      // order, and nothing in this process can.
+      selected = id && board.runners.some((r) => r.id === id) ? id : null;
+      log(selected ? `strategy selected: ${selected}` : 'strategy cleared');
+      broadcast(strategyEvent());
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, selected }));
+    } catch (err) {
+      res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: String(err.message) }));
+    }
+    return;
+  }
+
   if (url.pathname === '/health') {
     cors(res);
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(statusEvent()));
@@ -313,6 +356,8 @@ function snapshot() {
   return {
     ...statusEvent(),
     security: state.security,
+    selected,
+    strategies: board.summaries,
     clock: state.clock,
     total: state.total,
     session: state.session,

@@ -7,6 +7,6 @@
   "scripts": {
     "start": "node hub/server.js",
     "replay": "node hub/server.js --replay",
-    "test": "node --test hub/*.test.js extension/*.test.js"
+    "test": "node --test hub/*.test.js hub/strategies/*.test.js extension/*.test.js"
   }
 }

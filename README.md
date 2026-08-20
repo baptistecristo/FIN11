@@ -1,7 +1,8 @@
 # FIN11: Genie bottles
 
 A live viewer for the NHH FIN11 trading sessions. It shows every filled trade as it
-prints, and draws a price curve that gains one point per fill.
+prints, draws a price curve that gains one point per fill, and runs three strategies
+side by side on paper so you can see which one is winning right now.
 
 ![The viewer: fills tape on the left, price curve on the right](docs/viewer.jpg)
 <sub>Synthetic test data. The trader names are invented.</sub>
@@ -58,6 +59,36 @@ site risky. A test asserts those names appear nowhere in the injected code.
 </details>
 
 <details>
+<summary><b>The strategy panel</b></summary>
+
+Three strategies run all session on their own paper portfolios, seeded from your real
+account at the open, and scored on the same formula the class is ranked by. The panel
+shows each one's gain, how it is doing against you, and a sparkline of its session.
+
+| | |
+|---|---|
+| **Ladder out** | Sells a steady clip on a schedule, ignoring price. The control. |
+| **Hold to cap** | Holds for the top, then dumps once price stalls near 25,000. |
+| **Sell on reversal** | Rides the move, unloads in clips on the first sustained turn. |
+
+They are scaffolding, not researched edges. Every number that shapes their behaviour
+sits at the top of `hub/strategies/registry.js`.
+
+**The fill model is deliberately pessimistic.** A taking order fills at the quoted
+price and only for the size actually quoted. A resting order fills only when a print
+goes *through* its price, never merely at it, because at your own price you are behind
+the queue that was already there. An optimistic model would have shown all three
+strategies filling instantly at the cap in Session 1 and made every one of them look
+brilliant.
+
+Clicking a card selects it and shows what it would do right now. **Nothing is sent.**
+Execution is not built: the FTS order functions raise a blocking `alert()` on their
+error paths, which freezes browser automation entirely, and that wants a kill switch
+and a written set of rules first.
+
+</details>
+
+<details>
 <summary><b>Running it without a live market</b></summary>
 
 ```powershell
@@ -107,6 +138,7 @@ for both. Pricing off the first leg alone gives you zero.
 
 ```
 hub/          receives the feed, records it, serves the viewer
+  strategies/   paper portfolios and the fill model
 extension/    captures the market feed (read-only)
 ui/           the viewer window
 scripts/      launcher, and a synthetic feed for testing

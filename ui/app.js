@@ -1,6 +1,7 @@
 // Viewer wiring: consume the hub's event stream, keep local state, paint.
 
 import { drawChart } from './chart.js';
+import { initStrategies, paintStrategies } from './strategies.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -17,6 +18,7 @@ const el = {
   cash: $('cash'), position: $('position'), vt: $('vt'), total: $('total'),
   fillCount: $('fill-count'),
   frames: $('frames'), notice: $('notice'),
+  stratList: $('strategies'), stratYou: $('strat-you-gain'),
 };
 el.countdownBox = el.countdown.closest('.acct');
 
@@ -37,6 +39,7 @@ const state = {
   cash: null, position: null, vt: null,
   best: { bid: null, ask: null },
   points: [], myfills: [],
+  strategies: [], selected: null,
   lastPrice: null, lastTick: 0,
 };
 
@@ -245,6 +248,24 @@ function paintAccount() {
   setFigure(el.total, state.cash);
 }
 
+// Selecting is optimistic locally; the hub confirms and re-broadcasts.
+async function chooseStrategy(id) {
+  state.selected = id;
+  schedulePanels();
+  try {
+    const res = await fetch('/select', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+  } catch {
+    el.notice.textContent = 'Could not reach the hub to change strategy.';
+  }
+}
+
+initStrategies(chooseStrategy);
+
 function paintTopOfBook() {
   const show = (q) => (q ? `${fmt(q.price)} × ${q.qty ?? '?'}  ${q.trader ?? 'unnamed'}` : '—');
   el.bidWho.textContent = show(state.best.bid);
@@ -297,17 +318,30 @@ function frame() {
 }
 requestAnimationFrame(frame);
 
+const panels = [
+  ['status', paintStatus],
+  ['clock', paintClock],
+  ['account', paintAccount],
+  ['book', paintTopOfBook],
+  ['last', paintLast],
+  ['strategies', () => paintStrategies(state, { list: el.stratList, you: el.stratYou }, fmt)],
+];
+
 let panelsQueued = false;
 function schedulePanels() {
   if (panelsQueued) return;
   panelsQueued = true;
   requestAnimationFrame(() => {
     panelsQueued = false;
-    paintStatus();
-    paintClock();
-    paintAccount();
-    paintTopOfBook();
-    paintLast();
+    // Each panel is isolated. One of them throwing during a live session must
+    // not blank every other reading on the screen.
+    for (const [name, paint] of panels) {
+      try {
+        paint();
+      } catch (err) {
+        console.error(`[tape] ${name} failed:`, err);
+      }
+    }
   });
 }
 
@@ -323,6 +357,8 @@ function applySnapshot(snap) {
     security: snap.security, clock: snap.clock, total: snap.total || 3000,
     session: snap.session, cash: snap.cash, position: snap.position, vt: snap.vt,
     best: snap.best || { bid: null, ask: null },
+    strategies: snap.strategies || [],
+    selected: snap.selected ?? null,
     myfills: snap.myfills || [],
   });
   // The curve is the fills, so it rebuilds straight from the trade history.
@@ -348,6 +384,10 @@ function apply(event) {
     case 'snapshot':
       applySnapshot(event.state);
       return;
+    case 'strategies':
+      state.strategies = event.board;
+      state.selected = event.selected;
+      break;
     case 'status':
       state.connected = event.connected;
       state.frames = event.frames;
