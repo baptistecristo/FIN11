@@ -259,22 +259,26 @@ export class StrategyBoard {
   }
 
   handle(event) {
-    const m = this.market;
+    // Re-read after a reset rather than aliasing once: reset() replaces the
+    // market object, and a stale reference would keep writing into the book the
+    // reset was there to throw away.
+    let m = this.market;
     switch (event.t) {
       case 'clock':
         m.clock = event.clock;
         if (event.total != null) m.total = event.total;
         break;
       case 'session':
-        if (event.total != null) m.total = event.total;
         if (event.state === 'start') {
           // A fresh period starts the comparison over, and seeds immediately on
           // the standard hand rather than waiting for the first account
           // message. Otherwise the strategies miss the opening minutes, which
           // is exactly where an accumulating strategy does its work.
           this.reset();
+          m = this.market;
           for (const r of this.runners) r.seed(OPENING_CASH, OPENING_BOTTLES);
         }
+        if (event.total != null) m.total = event.total;
         break;
       case 'quote':
         m.best[event.side] = event.price === null ? null : { price: event.price, qty: event.qty };
@@ -301,6 +305,14 @@ export class StrategyBoard {
   }
 
   reset() {
+    // The book goes with the portfolios. A new period inherits nothing from the
+    // last one, and forgetting that is not a cosmetic bug: the previous
+    // session's final bid sat at the 25,000 cap while the new session's first
+    // offer arrived near 1,200, which reads as a crossed book worth 23,743 a
+    // bottle. The sniper bought ten of them. On a live feed the FTS server runs
+    // a practice period before the graded one, and this path can be armed to
+    // send real orders.
+    this.market = { clock: null, total: null, best: { bid: null, ask: null }, last: null, vt: null };
     for (const r of this.runners) {
       r.portfolio = new Portfolio();
       r.series = [];

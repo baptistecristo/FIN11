@@ -61,18 +61,31 @@ async function main() {
   let round = 0;
   for (let clock = TOTAL - 20; clock > 150; clock -= 20) {
     round += 1;
+    const previousPrice = previous;
     price = Math.min(CAP, Math.max(50, Math.round(price * (1 + (Math.random() * 0.16 - 0.045)))));
     const tick = Math.sign(price - previous);
     previous = price;
 
+    const bid = price - 2;
+    const ask = Math.min(CAP, price + 3);
+    const bidMsg = { header: 'bestbid', isno: 1, msg: 'x', price: String(bid), qty: '40', displayName: someone(round), msg2: `<tr><td>${bid}</td><td>40</td></tr>` };
+    const askMsg = { header: 'bestask', isno: 1, msg: 'x', price: String(ask), qty: '12', displayName: someone(round + 3), msg2: `<tr><td>${ask}</td><td>12</td></tr>` };
+
+    // Publish the side that leaves the book uncrossed after EACH message, not
+    // just after both. A strategy reacts to one quote at a time, so sending a
+    // risen bid before the offer that justifies it creates an instant where the
+    // new bid sits above the previous, lower offer — a crossed book that never
+    // existed. This fixture used to do exactly that, and the sniper collected
+    // 149 fills off it against the 5 crossed moments in the whole real capture.
+    const quotes = price >= previousPrice ? [askMsg, bidMsg] : [bidMsg, askMsg];
+
     const batch = [
       { header: 'time', msg: String(clock) },
-      { header: 'bestbid', isno: 1, msg: 'x', price: String(price - 2), qty: '40', displayName: someone(round), msg2: `<tr><td>${price - 2}</td><td>40</td></tr>` },
-      { header: 'bestask', isno: 1, msg: 'x', price: String(Math.min(CAP, price + 3)), qty: '12', displayName: someone(round + 3), msg2: `<tr><td>${price + 3}</td><td>12</td></tr>` },
+      ...quotes,
       // Print at whichever side was taken, so the resting quoter resolves the
       // way it does in a real book.
-      { header: 'lasttrade', isno: 1, price: String(tick >= 0 ? Math.min(CAP, price + 3) : price - 2), qty: String(1 + Math.floor(Math.random() * 40)), lastTick: String(tick) },
-      { header: 'bidasklast', isno: 1, iTime: String(clock), msg: String(price - 2), msg1: String(Math.min(CAP, price + 3)), msg2: String(price) },
+      { header: 'lasttrade', isno: 1, price: String(tick >= 0 ? ask : bid), qty: String(1 + Math.floor(Math.random() * 40)), lastTick: String(tick) },
+      { header: 'bidasklast', isno: 1, iTime: String(clock), msg: String(bid), msg1: String(ask), msg2: String(price) },
     ];
 
     // A fill of your own: both legs in the same push, as the server sends them.

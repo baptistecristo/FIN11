@@ -214,3 +214,25 @@ test('the sparkline keeps one point per clock unit', () => {
   }
   assert.equal(runner.series.length, 3);
 });
+
+test('a new period inherits no book from the last one', () => {
+  // The FTS server runs a practice period before the graded one. Carrying the
+  // old book across the boundary leaves the previous session's closing bid — at
+  // the 25,000 cap — standing against the new session's opening offer near
+  // 1,200, which reads as a crossed book worth 23,743 a bottle. The sniper
+  // bought ten of them, and this path can be armed to send real orders.
+  const board = new StrategyBoard([scripted([])]);
+  board.handle({ t: 'session', state: 'start', total: 3000 });
+  board.handle({ t: 'quote', side: 'bid', price: 25000, qty: 8000 });
+  board.handle({ t: 'quote', side: 'ask', price: 25000, qty: 40 });
+  board.handle({ t: 'trade', price: 25000, qty: 1, tick: 1 });
+  assert.equal(board.market.best.bid.price, 25000);
+
+  board.handle({ t: 'session', state: 'start', total: 3000 });
+  assert.equal(board.market.best.bid, null, 'stale bid survived the new period');
+  assert.equal(board.market.best.ask, null, 'stale offer survived the new period');
+  assert.equal(board.market.last, null);
+  // And the total that arrived with the reset is still recorded.
+  assert.equal(board.market.total, 3000);
+  assert.equal(board.runners[0].portfolio.position, OPENING_BOTTLES);
+});

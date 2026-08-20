@@ -118,34 +118,43 @@ test('cap strike does not re-park an unchanged position every tick', () => {
 
 // Ratchet ---------------------------------------------------------------------
 
-test('ratchet refuses to sell below its floor', () => {
+test('ratchet parts with almost nothing early in a climb', () => {
   const s = byId('ratchet');
-  // 9,999 is under 40% of the 25,000 cap.
-  const c = withMemory(s, { best: { bid: { price: 9999, qty: 99 }, ask: null } });
-  const out = s.onEvent({ t: 'quote', side: 'bid', price: 9999, qty: 99 }, c);
-  assert.deepEqual(sells(out), []);
+  // A tenth of the way to the ceiling: nearly all of the move is still ahead.
+  const c = withMemory(s, { best: { bid: { price: 2500, qty: 99 }, ask: null } });
+  const out = sells(s.onEvent({ t: 'quote', side: 'bid', price: 2500, qty: 99 }, c));
+  const qty = out.reduce((n, i) => n + i.qty, 0);
+  assert.ok(qty <= 1, `sold ${qty} of 20 at a tenth of the cap`);
 });
 
-test('ratchet requires each clip to beat the last sale by a wide margin', () => {
+test('ratchet sells more as the bid closes on the cap', () => {
   const s = byId('ratchet');
-  const c = withMemory(s, { best: { bid: { price: 10000, qty: 99 }, ask: null } });
-  assert.equal(sells(s.onEvent({ t: 'quote', side: 'bid', price: 10000, qty: 99 }, c)).length, 1);
-
-  // A new high, but only 10% better: not enough to give up more inventory.
-  c.best.bid = { price: 11000, qty: 99 };
-  assert.deepEqual(sells(s.onEvent({ t: 'quote', side: 'bid', price: 11000, qty: 99 }, c)), []);
-
-  // 40% better clears the bar.
-  c.best.bid = { price: 14000, qty: 99 };
-  assert.equal(sells(s.onEvent({ t: 'quote', side: 'bid', price: 14000, qty: 99 }, c)).length, 1);
+  const c = withMemory(s, { best: { bid: { price: 17500, qty: 99 }, ask: null } });
+  // 70% of the way to the ceiling, squared, is about half the endowment.
+  const qty = sells(s.onEvent({ t: 'quote', side: 'bid', price: 17500, qty: 99 }, c))
+    .reduce((n, i) => n + i.qty, 0);
+  assert.ok(qty >= 8 && qty <= 12, `sold ${qty} at 70% of the cap`);
 });
 
-test('ratchet does not sell into weakness', () => {
+test('ratchet never sells backwards when the bid falls', () => {
   const s = byId('ratchet');
-  const c = withMemory(s, { best: { bid: { price: 12000, qty: 99 }, ask: null } });
-  s.onEvent({ t: 'quote', side: 'bid', price: 12000, qty: 99 }, c);
-  c.best.bid = { price: 11000, qty: 99 };
-  assert.deepEqual(sells(s.onEvent({ t: 'quote', side: 'bid', price: 11000, qty: 99 }, c)), []);
+  const c = withMemory(s, { best: { bid: { price: 17500, qty: 99 }, ask: null } });
+  const first = sells(s.onEvent({ t: 'quote', side: 'bid', price: 17500, qty: 99 }, c))
+    .reduce((n, i) => n + i.qty, 0);
+  c.position = 20 - first;
+  c.best.bid = { price: 10000, qty: 99 };
+  assert.deepEqual(sells(s.onEvent({ t: 'quote', side: 'bid', price: 10000, qty: 99 }, c)), []);
+});
+
+test('ratchet still sells near the session high when the cap never comes', () => {
+  const s = byId('ratchet');
+  // Half the session gone, the market topped out at 200, and the cap-relative
+  // anchor is therefore worthless. This is the case the old 40%-of-cap floor
+  // sat out entirely.
+  const c = withMemory(s, { clock: 1500, best: { bid: { price: 200, qty: 99 }, ask: null } });
+  const qty = sells(s.onEvent({ t: 'quote', side: 'bid', price: 200, qty: 99 }, c))
+    .reduce((n, i) => n + i.qty, 0);
+  assert.ok(qty > 0, 'expected the session-relative anchor to sell something');
 });
 
 // Trailing peak ---------------------------------------------------------------
@@ -162,16 +171,38 @@ test('trailing peak holds while the market makes new highs', () => {
 test('trailing peak needs the break confirmed before it leaves', () => {
   const s = byId('trailing-peak');
   const c = withMemory(s, { clock: 1500 });
-  s.onEvent({ t: 'trade', price: 10000, qty: 5, tick: 1 }, c);
-  s.onEvent({ t: 'trade', price: 20000, qty: 5, tick: 1 }, c);
+  // The break is measured on the bid, which is what leaving actually sells
+  // into, so the book moves with the prints.
+  const at = (price) => {
+    c.best.bid = { price, qty: 99 };
+    return sells(s.onEvent({ t: 'trade', price, qty: 5, tick: price >= 20000 ? 1 : -1 }, c));
+  };
+  at(10000);
+  at(20000);
 
-  // A 2% dip is noise.
-  assert.deepEqual(sells(s.onEvent({ t: 'trade', price: 19600, qty: 5, tick: -1 }, c)), []);
-  // Past the 8% band, but one print is not a break.
-  assert.deepEqual(sells(s.onEvent({ t: 'trade', price: 18000, qty: 5, tick: -1 }, c)), []);
-  assert.deepEqual(sells(s.onEvent({ t: 'trade', price: 18000, qty: 5, tick: -1 }, c)), []);
-  // Third confirms it.
-  assert.equal(sells(s.onEvent({ t: 'trade', price: 18000, qty: 5, tick: -1 }, c))[0].qty, 20);
+  assert.deepEqual(at(19600), [], 'a 2% dip is noise');
+  assert.deepEqual(at(18000), [], 'one print past the band is not a break');
+  assert.deepEqual(at(18000), [], 'nor is two');
+  // Third confirms it, and it leaves in tranches rather than all at once.
+  assert.equal(at(18000)[0].qty, 10);
+});
+
+test('trailing peak widens its band in a market that wobbles', () => {
+  const s = byId('trailing-peak');
+  const c = withMemory(s, { clock: 1500 });
+  const at = (price, tick = 1) => {
+    c.best.bid = { price, qty: 99 };
+    return sells(s.onEvent({ t: 'trade', price, qty: 5, tick }, c));
+  };
+  at(10000);
+  at(20000);
+  // A 15% pullback that recovers to a new high: this market's ordinary weather.
+  at(17000, -1);
+  at(21000);
+  // The same 15% again is now inside the learned band, so it is not a top.
+  for (let i = 0; i < 5; i += 1) {
+    assert.deepEqual(at(17850, -1), [], 'a pullback it has already survived is not a break');
+  }
 });
 
 test('trailing peak ignores a dip before the market has actually run', () => {
@@ -303,9 +334,17 @@ test('corner never bids above its ceiling, whatever the market does', () => {
   assert.equal(out.some((i) => i.kind === 'take' && i.side === 'buy'), false);
 });
 
+// Corner only buys once a bubble is visibly under way, so its tests have to
+// hand it a market that has already run.
+const bubbling = (c, { openBid = 100, bidHigh = 5000 } = {}) => {
+  c.memory.openBid = openBid;
+  c.memory.bidHigh = bidHigh;
+  return c;
+};
+
 test('corner improves the bid by a step rather than leaping above it', () => {
   const s = byId('corner');
-  const c = withMemory(s, { clock: 2900, position: 0 });
+  const c = bubbling(withMemory(s, { clock: 2900, position: 0 }));
   // The offer is above the buy ceiling, so there is nothing cheap to take and
   // it has to post a bid instead.
   c.best = { bid: { price: 1000, qty: 50 }, ask: { price: 9000, qty: 50 } };
@@ -319,11 +358,32 @@ test('corner improves the bid by a step rather than leaping above it', () => {
 
 test('corner takes an offer that is already cheap instead of advertising', () => {
   const s = byId('corner');
-  const c = withMemory(s, { clock: 2900, position: 0 });
+  const c = bubbling(withMemory(s, { clock: 2900, position: 0 }));
   c.best = { bid: { price: 500, qty: 50 }, ask: { price: 3000, qty: 50 } };
   const out = s.onEvent({ t: 'quote', side: 'ask', price: 3000, qty: 50 }, c);
   const take = out.find((i) => i.kind === 'take');
   assert.equal(take.side, 'buy');
+});
+
+test('corner will not buy in a market that has not bubbled', () => {
+  const s = byId('corner');
+  // Opened at 100 and has never been above 150: no bubble, no bet. This is the
+  // session where the old version spent its way through the endowment.
+  const c = bubbling(withMemory(s, { clock: 2900, position: 0 }), { openBid: 100, bidHigh: 150 });
+  c.best = { bid: { price: 120, qty: 50 }, ask: { price: 130, qty: 50 } };
+  const out = s.onEvent({ t: 'quote', side: 'ask', price: 130, qty: 50 }, c) ?? [];
+  assert.equal(out.some((i) => i.side === 'buy'), false);
+});
+
+test('corner never pays more than a bid this session has already shown', () => {
+  const s = byId('corner');
+  // The ceiling is a share of the cap OR a share of the best bid seen,
+  // whichever is lower. Here the market has only ever bid 1,000.
+  const c = bubbling(withMemory(s, { clock: 2900, position: 0 }), { openBid: 100, bidHigh: 1000 });
+  c.best = { bid: { price: 900, qty: 50 }, ask: { price: 950, qty: 50 } };
+  const out = s.onEvent({ t: 'quote', side: 'ask', price: 950, qty: 50 }, c) ?? [];
+  assert.equal(out.some((i) => i.kind === 'take' && i.side === 'buy'), false,
+    'a 950 offer is above 90% of the best bid ever seen');
 });
 
 test('corner stops buying once the accumulation window closes', () => {

@@ -1,7 +1,7 @@
 # FIN11: Genie bottles
 
 A live viewer for the NHH FIN11 trading sessions. It shows every filled trade as it
-prints, draws a price curve that gains one point per fill, and runs three strategies
+prints, draws a price curve that gains one point per fill, and runs five strategies
 side by side on paper so you can see which one is winning. Any of them can be armed to
 trade for real, behind two switches and a kill key.
 
@@ -66,36 +66,51 @@ site risky. A test asserts those names appear nowhere in the injected code.
 <details>
 <summary><b>The strategy panel</b></summary>
 
-Three strategies run all session on their own paper portfolios, seeded from your real
+Five strategies run all session on their own paper portfolios, seeded from your real
 account at the open and scored on the formula the class is ranked by.
 
-They are built around what Session 1 actually did. From the captured book: the market
-pinned at the 25,000 cap from **minute 19.6** onward and was still there nine minutes
-later when the capture ended, with a bid for **8,687 bottles** sitting at the cap.
-Liquidity was never the constraint. The realised average that day was 8,093 a bottle
-against 25,000 available for ten minutes straight.
+They start from what Session 1 actually did. From the captured book: the market pinned
+at the 25,000 cap from **minute 19.6** onward and was still there nine minutes later
+when the capture ended, with a bid for **8,687 bottles** sitting at the cap. Liquidity
+was never the constraint. The realised average that day was 8,093 a bottle against
+25,000 available for ten minutes straight.
 
 So the mistake was not being late to the exit. It was selling cheap into a market
 pinned at its own hard maximum. That gives one rule that needs no market reading at
 all: **25,000 is enforced by the server, so no higher price can ever print.** Once the
 best bid touches it, holding has no upside left and a retreating bid is a real risk.
-All three strategies share that rule and differ only on the way up.
+
+The same capture holds a second lesson that took longer to notice. At **minute 23.15**
+the best bid went 24,888 → 23,000 → **1,000** and stayed under 15,000 for about fifty
+seconds, while prints carried on at 25,000 because buyers were still lifting offers. A
+387-lot bid had been eaten and the book underneath it was air. Any rule that answers
+"sell everything now" with a market order can land in that window and realise 4% of
+what it expected — so no strategy here will sell into a bid that has fallen away from
+the offer, right up until the bell makes any price better than none.
 
 | | what it does | best when |
 |---|---|---|
-| **1 Cap strike** | Waits for the bid to reach the cap, then sells the lot. Parks an ask under the cap meanwhile. | the market pins at the ceiling, as it did in Session 1 |
-| **2 Ratchet** | Won't sell below 40% of the cap; each clip must beat the last sale by 35%. | you want a rising average price and no single timing call |
-| **3 Trailing peak** | Rides the climb, leaves on an 8% break confirmed over three prints. | the bubble breaks before the bell |
-| **4 Corner** | Buys the float cheaply in the opening minutes, then sells into the bubble. | the bubble repeats. It loses money if it does not |
+| **1 Cap strike** | Waits for the bid to reach the cap, then sells the lot. Gives up on the cap once the market tops out below it. | the market pins at the ceiling, as it did in Session 1 |
+| **2 Ratchet** | Keeps the share sold in step with how far the bid has come toward the cap. Never sells backwards. | you want a rising average price and no single timing call |
+| **3 Trailing peak** | Rides the climb, leaves on a break bigger than any pullback this session has already recovered from. | the bubble breaks before the bell |
+| **4 Corner** | Buys the float on a fixed budget once a bubble is visibly under way, then sells into it. | the bubble repeats. It loses money if it does not |
 | **5 Sniper** | Takes crossed books: buys the offer and sells the bid at once. | almost never, see below |
 
 Press **1–5** to switch, **0** to clear. Switching while armed disarms.
 
 All five seed at the opening bell on the standard hand and run every tick from there,
 so the comparison covers the whole session rather than starting whenever you opened the
-window. They share three rules: sell everything once the bid reaches the cap, be flat
-before the bell, and concede on a reserve price that decays to zero as the clock runs
-out.
+window. They share four rules, in `hub/strategies/common.js`:
+
+- **take the ceiling.** Once the bid is at 25,000 there is nothing above it to wait for.
+- **finish flat, on a schedule.** Not a view on price — an admission that we do not know
+  which session this is. Nothing is sold on the clock alone before the halfway point;
+  from there the share that must already be gone rises to everything by the deadline.
+  It is what stops any of them holding the lot into a crash.
+- **refuse a hole.** A bid under half the offer is a gap in the book, not a price.
+- **learn what a break is worth.** Every rule that asks "has it topped out?" measures
+  against the largest pullback this market has already recovered from, rather than a
+  percentage picked in advance.
 
 ### Results by session
 
@@ -110,7 +125,7 @@ winner just tracks the shape the market happened to take. **One session's winner
 
 | Session | Date | Coverage | Mine | Cap strike | Ratchet | Trailing peak | Corner | Sniper | Winner |
 |---|---|---|---|---|---|---|---|---|---|
-| **1** | 18 Aug 2026 | ⚠️ 23% | 161,860 | 499,980 | 494,985 | 499,980 | 499,980 | 500,030 | — |
+| **1** | 18 Aug 2026 | ⚠️ 23% | 161,860 | 499,980 | 480,999 | 499,980 | 499,980 | 500,030 | — |
 | **2** | | | | | | | | | |
 | **3** | | | | | | | | | |
 
@@ -130,7 +145,69 @@ strategies seed late and the comparison is short again.
 
 ### How the shapes change the ranking
 
-Simulated sessions separate them where the real capture could not:
+The real capture cannot separate these strategies, so they are also run across seven
+synthetic session shapes, forty to sixty seeds each:
+
+```powershell
+node scripts\scenarios.js
+node scripts\scenarios.js --shape pop --seeds 200
+```
+
+`hub/sim/session.js` generates whole 50-minute sessions as the frames the server would
+have sent, so they run through the same tracker and the same paper engine as a live
+feed. What in it is measured and what is assumed is written at the top of that file. In
+short: print sizes, print rate, spread behaviour, the rate of crossed books and the
+liquidity hole are all calibrated against Session 1. Everything before minute 17, and
+six of the seven shapes, are hypotheses.
+
+**So this is not evidence about which strategy is best.** It is evidence about which
+ones fall apart when the session is not shaped like Session 1. Scores are given as a
+share of what was on the table — the most 20 bottles could have fetched against the
+bids that were actually quoted — because a pinned session pays a hundred times what a
+flat one does, and raw gains cannot be averaged across shapes without the pinned ones
+deciding everything. Corner exceeds 100% because it buys.
+
+| | pin | pop | late-break | damp | sawtooth | slow-burn | early-spike | **mean** | **worst** |
+|---|---|---|---|---|---|---|---|---|---|
+| Corner | 238% | 37% | 212% | 49% | 284% | 201% | 26% | **149%** | 26% |
+| Trailing peak | 99% | 54% | 98% | 58% | 63% | 50% | 54% | **68%** | 50% |
+| Cap strike | 94% | 46% | 94% | 43% | 88% | 59% | 38% | **66%** | 38% |
+| Sniper | 100% | 17% | 100% | 53% | 95% | 59% | 17% | **63%** | 17% |
+| Ratchet | 65% | 45% | 65% | 51% | 65% | 49% | 50% | **56%** | 44% |
+| *Bell dump* | *97%* | *14%* | *25%* | *44%* | *74%* | *77%* | *11%* | ***49%*** | *11%* |
+
+*Bell dump* is not a strategy — it holds everything and sells at the deadline. It is
+there because a strategy that cannot beat doing nothing is costing money to run, and
+because it wins outright in `slow-burn`, where the market peaks at the bell.
+
+What the shapes did to the strategies as they were originally written:
+
+| | was | now | what was wrong |
+|---|---|---|---|
+| Trailing peak | 31% | **68%** | An 8% stop is inside the ordinary noise of a market climbing 500-fold. It sold at 1,000 on the way to 25,000, scoring 23% in the very shape it was designed for. It now measures the market's own pullbacks and requires a break bigger than any of them. |
+| Cap strike | 59% | **66%** | Waiting for a ceiling the market never reaches paid 11% in `early-spike`. It now gives up on the cap when the market has clearly topped out below it — but on a learned band, because a fixed 30% give-up fired on ordinary noise and cost half of `slow-burn`. |
+| Ratchet | 57% | **56%** | Its floor of 40% of the cap meant "never sell" in a session topping out at 200. Roughly the same mean, but a far tighter distribution: its worst shape went from 38% to 44%, and its worst single session in `pin` from 325,208 to 323,294 against a mean of 326,159. |
+| Corner | 189% | **149%** | Its only limit on spending was a share of the cap, so in a flat session it could spend more than the endowment could ever be worth. A budget and a requirement that the market has already multiplied eightfold cost it 40 points of mean and turned its worst `damp` session from −5,276 into +827. |
+| Sniper | 60% | **63%** | Little to fix. It will no longer lift an offer unless the bid it intends to sell into is quoted for the size. |
+
+The honest summary: **no strategy wins everywhere, and the spread between them is
+smaller than the spread between shapes.** Trailing peak has the best mean and the best
+worst case among the sell-only strategies; Cap strike is close and much better in the
+Session 1 shape; Corner has by far the highest mean and is the only one that can lose
+money. Which is to say the shape of the session matters more than the choice of
+strategy, which is exactly why the panel runs all five side by side rather than picking
+one.
+
+<sub>Two cautions, both learned the hard way here. The first generator moved price 3.5%
+per quote and updated the bid before the ask, manufacturing a crossed book on every
+tick; the sniper "earned" 199 fills against the 5 that exist in real data. The second
+version fixed the price path and still published the two sides of the book in the wrong
+order, so a rising bid briefly sat above the previous lower ask — the sniper harvested
+the entire climb from that, 2.8m a session, five times what was ever on the table. A
+test now walks a generated session one message at a time and fails if crossed books are
+more common than the 0.36% measured in the real capture, or if any edge exceeds the
+largest real one. **A backtest will happily generate the opportunity you are testing
+for.**</sub>
 
 ### The corner, and why it is bounded
 
@@ -145,6 +222,22 @@ upside left. Hence a hard buy ceiling at 30% of the cap, a 70-bottle limit, and 
 improve the market by one step rather than leaping above it — leap, and you become the
 only buyer, everyone dumps on you, and you finish holding worthless bottles with the cash
 gone.
+
+Three bounds were added after the shapes were run, because the arithmetic above says
+nothing about the session where there is no bubble to buy into:
+
+- **a budget.** 120,000, and that is what this bet is allowed to lose. A ceiling written
+  only as a share of the cap let it spend 525,000 in a market that topped out at 200.
+- **evidence.** It will not buy until the market has multiplied **eightfold** off its
+  opening bid. Three was not enough: a quiet session drifts by a factor of three on its
+  own, and buying that drift is how the bet lost money in the one shape where there was
+  never a bet to make. Session 1 went from a 750 bid to 25,000 in under three minutes,
+  so a real bubble clears eight easily.
+- **never pay more than 90% of the best bid the session has produced.** You can only
+  sell to a bid, so that is the floor of the whole idea.
+
+Together they cost about 40 points of mean and turned its worst flat session from
+−5,276 into +827. It is still the only strategy here that can lose money.
 
 ### Arbitraging other people's mistakes
 
@@ -161,19 +254,25 @@ And the risk is one-sided: profit is 1 a bottle when both legs fill, the loss is
 bell. That needs a **99.996%** fill rate to break even. Backtested on the real capture,
 Sniper earns **50** more than simply exiting well.
 
-It exists so the question is answered with a number rather than a hunch, and to catch a
-genuinely fat mistake if a later session is more volatile. It is not where the money is.
+It also will not lift an offer unless the bid it intends to sell into is quoted for at
+least as much size. Buying ten against a bid for one and hoping is how the 24,999 gets
+lost.
 
-<sub>A caution learned building this: an early synthetic generator moved price 3.5% per
-quote and updated the bid before the ask, manufacturing a crossed book on every single
-tick. Sniper "earned" 199 fills against the 5 that exist in real data. A backtest will
-happily generate the opportunity you are testing for.</sub>
+It exists so the question is answered with a number rather than a hunch, and to catch a
+genuinely fat mistake if a later session is more volatile. Across all seven simulated
+shapes it earns what the real capture said it would: nothing worth having. It is not
+where the money is.
 
 **The fill model is deliberately pessimistic.** A taking order fills at the quoted price
 and only for the size quoted. A resting order fills only when a print goes *through* its
 price, never merely at it, because at your own price you are behind the queue that was
 already there. It also cannot model queue position or your own market impact, so use the
 panel to rank strategies against each other rather than to predict your actual take.
+
+That last limitation is worth stating plainly against the simulated shapes above: the
+market there does not react to your orders. Corner buying seventy bottles — three and a
+half endowments — would in a real class move the price it is buying at, and its 149% is
+the most optimistic number on this page for that reason.
 
 Clicking a card selects it and shows what it would do right now. Selecting alone sends
 nothing; see below for what it takes to actually place orders.
@@ -273,11 +372,14 @@ for both. Pricing off the first leg alone gives you zero.
 ```
 hub/          receives the feed, records it, serves the viewer
   strategies/   paper portfolios and the fill model
+    common.js     what every strategy remembers, and the rules none may break
+    registry.js   the five strategies themselves
+  sim/          synthetic sessions, and what in them is measured vs assumed
   execution.js  arming, order validation, the outbound queue
 extension/    captures the market feed, and (only when armed) sends orders
   execute.js    the one file that can place an order
 ui/           the viewer window
-scripts/      launcher, a synthetic feed, and the backtester
+scripts/      launcher, a synthetic feed, the backtester, the shape sweep
 data/         recorded sessions (git-ignored: these identify real classmates)
 ```
 

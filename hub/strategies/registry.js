@@ -1,20 +1,52 @@
-// Four strategies, built around what Session 1 actually did.
+// Five strategies, and what measuring them changed.
 //
-// The evidence, from the captured book (genie_orderbook_full.json):
+// THE GAME
 //
-//   - the market pinned at the 25,000 cap from minute 19.6 onward, and was
-//     still there when the capture ended nine minutes later
-//   - there was a bid for 8,687 bottles sitting at the cap; 20 bottles was a
-//     rounding error against it, so liquidity was never the constraint
-//   - the realised average that session was 8,093 a bottle, against 25,000
-//     available for ten minutes straight
+// The class trades one invented asset for 50 minutes. Bottles pay zero at the
+// bell, so total gain is cash plus realized utility and nothing else, and the
+// server enforces a hard price cap of 25,000 — no higher price can ever print.
+// Those two facts do most of the work here. The first says finish flat. The
+// second says that once the bid touches the ceiling, holding has no upside left
+// and a retreating bid is a real risk.
 //
-// So the mistake was not being late to the exit. It was selling cheap into a
-// market pinned at its own hard maximum. That gives one rule that needs no
-// market reading at all: 25,000 is enforced by the server, so no higher price
-// can ever print. Once the best bid touches it, holding has no upside left.
-// Every strategy here shares that rule, plus a reservation price that decays to
-// zero as the bell approaches, because bottles pay nothing when it rings.
+// WHAT SESSION 1 SAID
+//
+// From the captured book: the market pinned at 25,000 from minute 19.6 onward
+// and was still there nine minutes later, with a bid for 8,687 bottles at the
+// cap. The realised average that day was 8,093 a bottle against 25,000
+// available for ten minutes straight. So the mistake was not being late to the
+// exit. It was selling cheap into a market pinned at its own maximum.
+//
+// The capture also contains one thing the first version of this file ignored.
+// At minute 23.15 the best bid went 24,888 -> 23,000 -> 1,000 and stayed under
+// 15,000 for about fifty seconds, while prints carried on at 25,000 because
+// buyers were still lifting offers. A 387-lot bid had been eaten and the book
+// underneath it was air. Any rule that answers "sell everything now" with a
+// market order can land in that window and realise 4% of what it expected.
+//
+// WHAT MEASURING SAID
+//
+// Session 1 cannot rank these: it covers 23% of one session, all of it with the
+// market already at the ceiling, and every strategy scores within 1% on it. So
+// they are also run across seven synthetic session shapes (hub/sim/session.js,
+// scripts/scenarios.js). That is not evidence about which strategy is best —
+// six of the seven shapes are hypotheses, not observations. It is evidence
+// about which strategies fall apart when the session is not shaped like Session
+// 1, and on that it was blunt:
+//
+//   - waiting for a ceiling the market never reaches returned 11% of what was
+//     available in `early-spike` and 15% in `pop`
+//   - a floor price written as a share of the cap means "never sell" in a
+//     session that tops out at 200
+//   - a fixed 8% trailing stop is inside the ordinary noise of a market
+//     climbing 500-fold, so it sold at 1,000 on the way to 25,000 and then
+//     watched: 23% of what was on the table in the shape it was designed for
+//   - buying the float with a budget set as a share of the cap can spend more
+//     than the endowment is worth in any session that does not bubble
+//
+// All four are fixed below, and the shared rules in common.js — finish flat on
+// a schedule, refuse a bid that has fallen out of the book, take the ceiling
+// when it appears — are the part that carried most of the improvement.
 //
 // A strategy is an object with `onEvent(event, ctx)` returning intents:
 //   { kind: 'take', side, qty }           crosses the spread now
@@ -24,123 +56,102 @@
 //
 // ctx: { clock, total, best, last, vt, position, cash, resting, memory, cap }
 
-const TICK = 0.01;
-
-// "At the cap" needs slack: the book showed bids at both 24,999 and 25,000, and
-// a tick below the ceiling is the ceiling for any decision that matters.
-const AT_CAP = 0.999;
-
-// Near enough to the ceiling to act on. Set tight: Session 1's bid sat at the
-// cap for ten minutes, so a loose band gives away real money for protection
-// against a retreat that did not happen. 0.97 still exits at 24,250 without
-// waiting on the exact number.
-const NEAR_CAP = 0.97;
-
-// Be flat with this much of the session left. Session 1's damage was done when
-// everyone tried to leave at once.
-const FLAT_AT = 0.08;
-
-const deadline = (ctx) => (ctx.total ?? 3000) * FLAT_AT;
-const elapsed = (ctx) => ((ctx.total ?? 3000) - (ctx.clock ?? 0)) / (ctx.total ?? 3000);
-const bidPrice = (ctx) => (ctx.best.bid ? ctx.best.bid.price : null);
-const askPrice = (ctx) => (ctx.best.ask ? ctx.best.ask.price : null);
-
-// Last resort: past the deadline, hit whatever bid is there.
-function bellGuard(ctx) {
-  if (ctx.position <= 0 || ctx.clock === null) return null;
-  if (ctx.clock > deadline(ctx)) return null;
-  // Urgent: nothing routine may delay beating the bell.
-  return [{ kind: 'cancel' }, { kind: 'take', side: 'sell', qty: ctx.position, urgent: true }];
-}
-
-// The dominance rule. Once the bid is at the ceiling there is nothing above it
-// left to wait for.
-function capGuard(ctx) {
-  if (ctx.position <= 0) return null;
-  const bid = bidPrice(ctx);
-  if (bid === null || bid < ctx.cap * AT_CAP) return null;
-  return [{ kind: 'cancel' }, { kind: 'take', side: 'sell', qty: ctx.position, urgent: true }];
-}
-
-// Fallback for a session that never reaches the cap.
-//
-// Session 1 reached the cap at minute 19.6, with 61% of the clock still to run.
-// Conceding from halfway would have sold into that climb for no reason, so this
-// stays quiet until well past it, and only speaks when the cap looks genuinely
-// out of reach.
-const DECAY_FROM = 0.3; // hold until 70% of the session has gone
-const CAP_IN_REACH = 0.85; // a high this close means the cap rule owns it
-const DECAY_CLIP = 0.34;
-
-function noteHigh(ctx, price) {
-  if (price > (ctx.memory.sessionHigh ?? 0)) ctx.memory.sessionHigh = price;
-}
-
-function reservePrice(ctx) {
-  const high = ctx.memory.sessionHigh ?? 0;
-  if (high <= 0 || ctx.clock === null) return null;
-  const total = ctx.total ?? 3000;
-  const start = total * DECAY_FROM;
-  const end = deadline(ctx);
-  // Silent until the concession window opens. A reserve equal to the high would
-  // fire on every touch of a new high, hijacking the strategy it backs up.
-  if (ctx.clock >= start) return null;
-  if (ctx.clock <= end) return 0;
-  return high * ((ctx.clock - end) / (start - end));
-}
-
-function decayGuard(ctx) {
-  if (ctx.position <= 0) return null;
-  // A market already near the ceiling does not need a fallback; the cap rule
-  // will take it, at a better price than any concession.
-  if ((ctx.memory.sessionHigh ?? 0) >= ctx.cap * CAP_IN_REACH) return null;
-  const bid = bidPrice(ctx);
-  const reserve = reservePrice(ctx);
-  if (bid === null || reserve === null || bid < reserve) return null;
-  if (ctx.memory.lastConcession === bid) return null;
-  ctx.memory.lastConcession = bid;
-  const clip = Math.max(1, Math.ceil(ctx.position * DECAY_CLIP));
-  // Pull resting orders first: a parked ask commits the position, and a sell
-  // that would exceed what is left is refused outright as a short.
-  return [{ kind: 'cancel' }, { kind: 'take', side: 'sell', qty: clip }];
-}
-
-// Order matters: the bell is absolute, the cap is the ceiling, and the decay
-// only speaks once neither of those has.
-const guards = (ctx) => bellGuard(ctx) ?? capGuard(ctx) ?? decayGuard(ctx);
-
-const baseMemory = () => ({ sessionHigh: 0, lastConcession: null });
+import {
+  TICK,
+  NEAR_CAP,
+  baseMemory,
+  observe,
+  guards,
+  sell,
+  breakBand,
+  bidPrice,
+  askPrice,
+  bidDepth,
+  bidIsReal,
+  bidReference,
+  elapsed,
+} from './common.js';
 
 // 1 --------------------------------------------------------------------------
-// Waits for the ceiling and parks an ask under it so a buyer lifting into the
-// cap fills it on the way.
+// Cap strike: wait for the ceiling, and hold an offer where it can be lifted.
+//
+// Two things changed. The parked ask used to sit at the cap all session, which
+// in Session 1 meant an order at 24,999.99 that only a print at exactly 25,000
+// could fill. Once the market is at the ceiling the offer now sits one tick
+// inside the best ask instead, at the front of the queue for the stream of
+// small prints that a pinned market produces — there were 1,112 of them in nine
+// minutes, 79% of them a single bottle.
+//
+// Second, it used to wait for a ceiling that might never arrive. It now gives
+// up on the cap once the market has clearly topped out below it.
+//
+// How far under the session's best bid counts as "the cap is not coming". A
+// fixed 30% looked safe and was not: in a market that swings 10% either way on
+// the ordinary noise of climbing 500-fold, a 30% retracement arrives regularly
+// and is not a top. Written as a multiple of the largest pullback this market
+// has already recovered from, it fires in `pop` and `early-spike`, where the
+// market really has rolled over, and stays quiet in `slow-burn`, where it cost
+// half the session's gain.
+const GIVE_UP_BAND = { min: 0.25, max: 0.5, multiple: 2.5 };
+const GIVE_UP_AFTER = 0.5; // and only once the session is half gone
+// Half the position, then wait. Without the pause the rule re-fires on the next
+// message and the "sell half" is a full liquidation inside two seconds, which
+// is how a give-up meant to be gradual emptied the book into a single price.
+const GIVE_UP_GAP = 60; // game-clock units between concessions
+
 const capStrike = {
   id: 'cap-strike',
   name: 'Cap strike',
-  blurb: 'Waits for the bid to reach the cap, then sells the lot. Concedes on a decaying reserve if the cap never comes.',
+  blurb: 'Waits for the bid to reach the cap, then sells the lot. Gives up on it if the market tops out below.',
 
-  init() {
-    return { ...baseMemory(), parked: 0 };
+  init(seed) {
+    return { ...baseMemory(seed), parked: null, conceded: null };
   },
 
   onEvent(event, ctx) {
-    if (event.t === 'trade') noteHigh(ctx, event.price);
+    observe(event, ctx);
     const forced = guards(ctx);
     if (forced) return forced;
     if (ctx.position <= 0) return [];
 
-    // Near the ceiling is worth taking. The gap between 23,500 and 25,000 is
-    // small next to the risk of the bid retreating while you hold out for it.
     const bid = bidPrice(ctx);
-    if (bid !== null && bid >= ctx.cap * NEAR_CAP) {
-      return [{ kind: 'cancel' }, { kind: 'take', side: 'sell', qty: ctx.position, urgent: true }];
+    const m = ctx.memory;
+
+    // Near the ceiling is worth taking outright.
+    if (bid !== null && bid >= ctx.cap * NEAR_CAP && bidIsReal(ctx)) {
+      return sell(ctx, ctx.position, { urgent: true });
     }
 
-    if (ctx.memory.parked !== ctx.position) {
-      ctx.memory.parked = ctx.position;
+    // The cap is not coming. Stop waiting for it and take what the market is
+    // paying, rather than riding the decline down to the deadline.
+    if (
+      elapsed(ctx) > GIVE_UP_AFTER &&
+      m.bidHigh > 0 &&
+      bid !== null &&
+      m.drawdown > breakBand(ctx, GIVE_UP_BAND) &&
+      (m.conceded === null || m.conceded - ctx.clock >= GIVE_UP_GAP) &&
+      bidIsReal(ctx)
+    ) {
+      const orders = sell(ctx, Math.max(1, Math.ceil(ctx.position / 2)));
+      if (orders.length) m.conceded = ctx.clock;
+      return orders;
+    }
+
+    // Where to rest the offer. Far from the ceiling it sits at the ceiling,
+    // costing nothing and catching a gap. Close to it, one tick inside the best
+    // ask, where a pinned market's prints will actually reach it.
+    const ask = askPrice(ctx);
+    const atTheTop = bid !== null && bid >= ctx.cap * 0.9;
+    const price =
+      atTheTop && ask !== null && ask - TICK > 0
+        ? Math.round((ask - TICK) * 100) / 100
+        : ctx.cap - TICK;
+
+    if (m.parked === null || m.parked.qty !== ctx.position || m.parked.price !== price) {
+      m.parked = { qty: ctx.position, price };
       return [
         { kind: 'cancel' },
-        { kind: 'make', side: 'sell', qty: ctx.position, price: ctx.cap - TICK },
+        { kind: 'make', side: 'sell', qty: ctx.position, price },
       ];
     }
     return [];
@@ -148,167 +159,225 @@ const capStrike = {
 };
 
 // 2 --------------------------------------------------------------------------
-// Sells on a rising price ladder. Selling on every new high is the Session 1
-// mistake in disguise, since in a climbing market every tick is a new high, so
-// the bar is a price step: each clip must beat the last sale by a wide margin,
-// and nothing goes below a floor.
-const RATCHET_FLOOR = 0.4; // refuse to sell below this share of the cap
-const RATCHET_STEP = 0.35; // each clip must beat the last sale by this much
+// Ratchet: hold a target share sold, and let the price decide what it is.
+//
+// The original refused to sell below 40% of the cap, which in a session topping
+// out at 200 means never selling at all. The obvious repair — rungs set as a
+// share of the session's own running high — is worse, and worth recording
+// because it looks so reasonable: the first bid of the session IS the running
+// high, so the ladder fires on tick one and the whole endowment is gone by 165
+// on a market heading for 25,000. It scored 0.4%.
+//
+// What is actually known here is the ceiling. No price above 25,000 can print,
+// so how far the bid has travelled toward it is a real measure of how much of
+// the move is already in hand. That is the first anchor, and it is squared so
+// that the early part of the climb, where most of the upside is still ahead,
+// sells almost nothing.
+//
+// The second anchor covers the sessions that never approach the ceiling. Late
+// on, a bid within a few percent of the best this session has produced is as
+// good as this market is going to offer, and waiting for the cap is waiting for
+// nothing. It is off early and decisive late, so it cannot pre-empt a climb.
+//
+// Whichever anchor asks for more wins, and the ratchet is that the share sold
+// never goes backwards.
+const CAP_REACH_POWER = 2; // squared: at half the cap, a quarter sold
+const HIGH_REACH_POWER = 8; // sharp: only a bid near the session's best counts
+const HIGH_ANCHOR_FROM = 0.4; // and only once the session is this far gone
 
 const ratchet = {
   id: 'ratchet',
   name: 'Ratchet',
-  blurb: 'Refuses to sell below 40% of the cap, and every clip must beat the last sale by 35%.',
+  blurb: 'Keeps the share sold in step with how far the bid has come toward the cap, and never sells backwards.',
 
-  init() {
-    return { ...baseMemory(), lastSale: 0, clips: 0 };
+  init(seed) {
+    return { ...baseMemory(seed), sold: 0 };
   },
 
   onEvent(event, ctx) {
-    if (event.t === 'trade') noteHigh(ctx, event.price);
+    observe(event, ctx);
     const forced = guards(ctx);
     if (forced) return forced;
-    if (event.t !== 'quote' || event.side !== 'bid' || ctx.position <= 0) return [];
+    if (ctx.position <= 0) return [];
 
     const bid = bidPrice(ctx);
-    if (bid === null) return [];
+    if (bid === null || !bidIsReal(ctx)) return [];
 
-    const bar = ctx.memory.lastSale > 0
-      ? ctx.memory.lastSale * (1 + RATCHET_STEP)
-      : ctx.cap * RATCHET_FLOOR;
-    if (bid < bar) return [];
+    const m = ctx.memory;
+    const u = elapsed(ctx);
 
-    ctx.memory.lastSale = bid;
-    ctx.memory.clips += 1;
-    // Small clips early, larger later. Each rung up is better information about
-    // how far this market will run, so commit more once it has proved itself
-    // rather than guessing at the first step.
-    const share = Math.min(0.5, 0.15 + 0.1 * ctx.memory.clips);
-    const clip = Math.max(1, Math.ceil(ctx.position * share));
-    return [{ kind: 'take', side: 'sell', qty: clip }];
+    const capReach = (Math.min(bid, ctx.cap) / ctx.cap) ** CAP_REACH_POWER;
+    const lateness = Math.max(0, (u - HIGH_ANCHOR_FROM) / (1 - HIGH_ANCHOR_FROM));
+    const highReach =
+      m.bidHigh > 0 ? (Math.min(bid, m.bidHigh) / m.bidHigh) ** HIGH_REACH_POWER * lateness : 0;
+
+    // Expressed, like the schedule, as a ceiling on what may still be held, so
+    // that the share sold cannot go backwards and a purchase cannot be read as
+    // falling behind.
+    const allowed = Math.floor(m.peak * (1 - Math.max(capReach, highReach)));
+    const owed = ctx.position - allowed;
+    if (owed <= 0) return [];
+
+    return sell(ctx, owed);
   },
 };
 
 // 3 --------------------------------------------------------------------------
-// Rides the climb and leaves on a genuine break. The first version used a 4%
-// band with no confirmation and got shaken out by ordinary noise on the way up,
-// finishing far behind the others. It now needs a wider break, several prints
-// to confirm it, and evidence the market actually ran first.
-const DRAWDOWN = 0.08; // how far off the session high counts as a break
-const CONFIRM_PRINTS = 3; // consecutive prints below the trigger
-const RUN_MULTIPLE = 1.5; // the market must have moved this much off its open
-const ARM_AFTER = 0.2;
+// Trailing peak: ride the climb, leave on a real break.
+//
+// This one was the worst of the five and the most interesting to fix. A fixed
+// 8% band sounds conservative until you notice that this market climbs from 50
+// to 25,000: an 8% pullback is ordinary weather on the way up, so it sold at a
+// thousand and watched the rest. Widening the band is not the fix either, since
+// what counts as a real break in `damp` and in `pin` differ by an order of
+// magnitude.
+//
+// So it measures instead. It tracks every pullback the market has recovered
+// from, and refuses to call a top on anything smaller than the largest of them.
+// A market that routinely gives back 9% has to give back appreciably more than
+// 9% before the break means anything. That number is learned per session and
+// needs no tuning.
+const BREAK_BAND = { min: 0.06, max: 0.35, multiple: 1.5 };
+const CONFIRM_PRINTS = 3; // a break has to survive a few prints to count
+const RUN_MULTIPLE = 2; // and the market has to have gone somewhere first
+const ARM_AFTER = 0.15;
+const FIRST_TRANCHE = 0.5; // half on the first break, the rest on the next
 
 const trailingPeak = {
   id: 'trailing-peak',
   name: 'Trailing peak',
-  blurb: 'Rides the climb, then sells everything once price breaks 8% off its high, confirmed over three prints.',
+  blurb: 'Rides the climb and leaves on a break bigger than any pullback this session has recovered from.',
 
-  init() {
-    return { ...baseMemory(), open: 0, below: 0 };
+  init(seed) {
+    return { ...baseMemory(seed), below: 0, tranches: 0 };
   },
 
   onEvent(event, ctx) {
-    if (event.t === 'trade') noteHigh(ctx, event.price);
+    observe(event, ctx);
     const forced = guards(ctx);
     if (forced) return forced;
     if (event.t !== 'trade' || ctx.position <= 0) return [];
 
     const m = ctx.memory;
-    if (m.open === 0) m.open = event.price;
-    if (event.price >= m.sessionHigh) {
-      m.below = 0;
-      return [];
-    }
+    if (m.bidHigh <= 0) return [];
     if (elapsed(ctx) < ARM_AFTER) return [];
-    // Do not treat a wobble as a top before the market has gone anywhere.
-    if (m.sessionHigh < m.open * RUN_MULTIPLE) return [];
+    if (m.openBid > 0 && m.bidHigh < m.openBid * RUN_MULTIPLE) return [];
 
-    if (event.price >= m.sessionHigh * (1 - DRAWDOWN)) {
+    // The drawdown is measured on the bid rather than on prints, because the
+    // bid is what a decision to leave actually sells into. Prints at the offer
+    // carried on at 25,000 all through Session 1's minute-23 hole, when the bid
+    // was the thing that had gone.
+    const trigger = breakBand(ctx, BREAK_BAND) * (m.tranches === 0 ? 1 : 1.5);
+    if (m.drawdown < trigger) {
       m.below = 0;
       return [];
     }
     m.below += 1;
     if (m.below < CONFIRM_PRINTS) return [];
+    m.below = 0;
 
-    return [{ kind: 'cancel' }, { kind: 'take', side: 'sell', qty: ctx.position, urgent: true }];
+    const qty = m.tranches === 0 ? Math.ceil(ctx.position * FIRST_TRANCHE) : ctx.position;
+    const orders = sell(ctx, qty, { urgent: true });
+    if (orders.length) m.tranches += 1;
+    return orders;
   },
 };
 
 // 4 --------------------------------------------------------------------------
-// Corner: buy the float cheaply in the opening minutes, then sell it into the
-// bubble.
+// Corner: buy the float cheaply while the bubble is forming, then sell it into
+// the bubble.
 //
 // The economics first, because they bound everything else. Cornering cannot
 // create demand here: bottles pay zero at the bell and Vt is about 2, so nobody
 // ever needs to buy them from you. Squeezing the supply just leaves you holding
-// all of it. The reason to do it anyway is that Session 1's market ran to the
-// 25,000 ceiling, and inventory bought cheaply beforehand is worth a great deal
-// into that.
+// all of it. The reason to do it anyway is that Session 1 ran to the ceiling,
+// and inventory bought cheaply beforehand is worth a great deal into that.
 //
-// So this is a directional bet on the bubble repeating rather than a squeeze,
-// and its discipline is arithmetic rather than taste: a bid at X only pays if
-// you can sell above X, and no price above 25,000 can ever print. Buying near
-// the ceiling is buying with no upside left, which is where the price ceiling
-// below comes from.
+// So it is a directional bet on the bubble repeating, and the discipline is
+// arithmetic. Three bounds, and the first two are new:
 //
-// The other half is the trap. Bid too aggressively and you become the only
-// buyer, everyone dumps on you, and you finish holding a pile of worthless
-// bottles with the cash gone. So the bid improves the market by one small step
-// instead of leaping above it, and both the price paid and the total position
-// are capped.
+//   - a cash budget. The old version's only limit on what it could spend was a
+//     share of the cap, which in a session that never bubbles is a licence to
+//     spend several times what the endowment could ever be worth. The budget is
+//     what this bet is allowed to lose.
+//   - evidence. It will not start buying until the market has already tripled
+//     off its opening bid. In a session that never bubbles that condition is
+//     never met and the strategy quietly becomes an ordinary seller.
+//   - never pay more than the highest bid the session has produced. You can
+//     only sell to a bid, so paying under the best one that has already existed
+//     is the arithmetic floor of the whole idea.
+//
+// And the trap it has always had to avoid: bid too aggressively and you become
+// the only buyer, everyone dumps on you, and you finish holding a pile of
+// worthless bottles with the cash gone. So the bid improves the market by one
+// small step instead of leaping above it.
 const BUY_CEILING = 0.3; // never pay more than this share of the cap
-const ACCUMULATE_UNTIL = 0.3; // stop buying once this much of the session has gone
-const MAX_INVENTORY = 70; // hard ceiling on bottles held
-const BID_IMPROVE = 1.02; // sit a step above the best bid, not miles above it
-const CLIP = 10; // bottles per resting bid
+const PAY_UNDER_HIGH = 0.9; // nor more than this share of the best bid seen
+// The market must have multiplied by this much before any buying starts. Eight
+// rather than three because a quiet session drifts by a factor of three on its
+// own — `damp` swings between 0.6x and 3.4x its own opening without anything
+// resembling a bubble — and buying that drift is how the bet loses money in the
+// one shape where there was never a bet to make. A real bubble here is an order
+// of magnitude: Session 1 went from a 750 bid to 25,000 in under three minutes.
+const RUN_EVIDENCE = 8;
+const BUDGET = 120000; // the most this bet may spend
+const ACCUMULATE_UNTIL = 0.35;
+const MAX_INVENTORY = 70;
+const BID_IMPROVE = 1.02;
+const CLIP = 10;
 
 const corner = {
   id: 'corner',
   name: 'Corner',
-  blurb: 'Buys the float cheaply in the opening minutes, then sells into the bubble. The high-risk one.',
+  blurb: 'Buys the float once a bubble is visibly forming, on a fixed budget, then sells into it. The high-risk one.',
 
-  init() {
-    return { ...baseMemory(), bidAt: 0 };
+  init(seed) {
+    return { ...baseMemory(seed), bidAt: 0, spent: 0 };
   },
 
   onEvent(event, ctx) {
-    if (event.t === 'trade') noteHigh(ctx, event.price);
+    observe(event, ctx);
 
     // The exit rules apply to the accumulated pile exactly as to the opening
     // endowment. This is the half that stops a failed corner being a total loss.
     const forced = guards(ctx);
     if (forced) return forced;
 
-    const accumulating = elapsed(ctx) < ACCUMULATE_UNTIL && ctx.position < MAX_INVENTORY;
+    const m = ctx.memory;
+    const run = m.openBid > 0 ? m.bidHigh / m.openBid : 0;
+    const accumulating =
+      elapsed(ctx) < ACCUMULATE_UNTIL &&
+      ctx.position < MAX_INVENTORY &&
+      m.spent < BUDGET &&
+      run >= RUN_EVIDENCE;
 
     if (!accumulating) {
       // Switch sides: pull the bid, then behave like cap strike.
-      if (ctx.memory.bidAt !== 0) {
-        ctx.memory.bidAt = 0;
+      if (m.bidAt !== 0) {
+        m.bidAt = 0;
         return [{ kind: 'cancel' }];
       }
       const bid = bidPrice(ctx);
-      if (ctx.position > 0 && bid !== null && bid >= ctx.cap * NEAR_CAP) {
-        return [
-          { kind: 'cancel' },
-          { kind: 'take', side: 'sell', qty: Math.min(ctx.position, 40), urgent: true },
-        ];
+      if (ctx.position > 0 && bid !== null && bid >= ctx.cap * NEAR_CAP && bidIsReal(ctx)) {
+        return sell(ctx, Math.min(ctx.position, 40), { urgent: true });
       }
       return [];
     }
 
     if (event.t !== 'quote') return [];
 
-    const ceiling = ctx.cap * BUY_CEILING;
+    const ceiling = Math.min(ctx.cap * BUY_CEILING, m.bidHigh * PAY_UNDER_HIGH);
     const bid = bidPrice(ctx);
     const ask = askPrice(ctx);
+    const room = Math.min(MAX_INVENTORY - ctx.position, Math.floor((BUDGET - m.spent) / Math.max(ceiling, 1)));
+    if (room <= 0) return [];
 
     // An offer already below the ceiling beats advertising a bid for it: take
     // it quietly and leave no signal.
     if (ask !== null && ask <= ceiling) {
-      const room = MAX_INVENTORY - ctx.position;
-      if (room > 0) return [{ kind: 'take', side: 'buy', qty: Math.min(CLIP, room) }];
+      const qty = Math.min(CLIP, room);
+      m.spent += qty * ask;
+      return [{ kind: 'take', side: 'buy', qty }];
     }
 
     // Otherwise post the best bid, one small step above the market so selling
@@ -316,17 +385,17 @@ const corner = {
     const target = Math.min(ceiling, bid === null ? ceiling * 0.5 : bid * BID_IMPROVE);
     if (!(target > 0)) return [];
     // Only re-post on a real move, or the book fills with churn.
-    if (Math.abs(target - ctx.memory.bidAt) < Math.max(TICK, ctx.memory.bidAt * 0.01)) return [];
+    if (Math.abs(target - m.bidAt) < Math.max(TICK, m.bidAt * 0.01)) return [];
 
-    ctx.memory.bidAt = target;
-    const room = MAX_INVENTORY - ctx.position;
+    m.bidAt = target;
+    const qty = Math.min(CLIP, room);
+    m.spent += qty * target;
     return [
       { kind: 'cancel' },
-      { kind: 'make', side: 'buy', qty: Math.min(CLIP, room), price: Math.round(target * 100) / 100 },
+      { kind: 'make', side: 'buy', qty, price: Math.round(target * 100) / 100 },
     ];
   },
 };
-
 
 // 5 --------------------------------------------------------------------------
 // Sniper: take a genuinely crossed book, buying the offer and selling the bid
@@ -337,31 +406,34 @@ const corner = {
 // strictly crossed moments, worth 794 in total, and the largest single edge was
 // one currency unit. There were no offers more than 10% below the last trade
 // and no bids more than 10% above it. The median spread was zero: with the
-// market pinned at the ceiling and a tick of 0.01, there is simply no room left
-// to be wrong in.
+// market pinned at the ceiling and a tick of 0.01, there is no room left to be
+// wrong in.
 //
 // The risk is the other half. The profit is 1 a bottle when both legs fill; the
 // loss is the full 24,999 if the sell leg misses, because what you are left
 // holding pays nothing at the bell. That needs a 99.996% fill rate to break
-// even, and the two legs are separate messages over a network.
+// even, and the two legs are separate messages over a network. So the added
+// rule here is that it will not lift an offer unless the bid it intends to sell
+// into is quoted for at least as much size — buying into a bid of one bottle
+// and hoping is how the 24,999 gets lost.
 //
-// So the size is deliberately small and the minimum edge is a real threshold
-// rather than one tick. It is here to be measured, and to catch a genuinely
-// fat mistake if session 2 is more volatile than session 1 was.
+// It is here to be measured, and to catch a genuinely fat mistake if a later
+// session is more volatile. Across seven simulated shapes it earns what the
+// real capture said it would: nothing worth having.
 const MIN_EDGE = 1; // currency units per bottle, not ticks
-const SNIPE_MAX = 10; // bottles per attempt
+const SNIPE_MAX = 10;
 
 const sniper = {
   id: 'sniper',
   name: 'Sniper',
-  blurb: 'Takes crossed books: buys the offer and sells the bid at once. Rare, and thin when it happens.',
+  blurb: 'Takes crossed books: buys the offer and sells the bid at once, only when both sides are quoted for the size.',
 
-  init() {
-    return { ...baseMemory(), taken: 0 };
+  init(seed) {
+    return { ...baseMemory(seed), taken: 0 };
   },
 
   onEvent(event, ctx) {
-    if (event.t === 'trade') noteHigh(ctx, event.price);
+    observe(event, ctx);
     const forced = guards(ctx);
     if (forced) return forced;
     if (event.t !== 'quote') return [];
@@ -376,8 +448,11 @@ const sniper = {
     // Buying above the ceiling is never worth it, crossed or not: what you are
     // buying still pays zero at the bell.
     if (ask.price > ctx.cap) return [];
+    // And a bid quoted for one bottle cannot take ten off your hands.
+    const depth = Math.min(bidDepth(ctx), Number.isFinite(ask.qty) ? ask.qty : SNIPE_MAX);
+    const qty = Math.max(1, Math.min(SNIPE_MAX, depth));
+    if (qty < 1) return [];
 
-    const qty = Math.max(1, Math.min(SNIPE_MAX, bid.qty ?? SNIPE_MAX, ask.qty ?? SNIPE_MAX));
     ctx.memory.taken += 1;
     // Both legs urgent: a cross that is not taken in the same instant is not a
     // cross any more, it is an unhedged position in something worth nothing.
@@ -389,3 +464,4 @@ const sniper = {
 };
 
 export const strategies = [capStrike, ratchet, trailingPeak, corner, sniper];
+export { bidReference };
