@@ -1,0 +1,12 @@
+{
+  "name": "fts-live-tape",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only live viewer for the FTS Web Trader market: streaming fills tape and price curve.",
+  "scripts": {
+    "start": "node hub/server.js",
+    "replay": "node hub/server.js --replay",
+    "test": "node --test hub/*.test.js extension/*.test.js"
+  }
+}

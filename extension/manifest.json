@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "FTS Live Tape (capture)",
+  "version": "1.0.0",
+  "description": "Read-only capture of the FTS Web Trader feed for the local live tape viewer. Never places orders.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "http://127.0.0.1:8787/*",
+    "http://localhost:8787/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "FTS Live Tape capture status",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://ftswebtrader.com/*",
+        "http://www.ftswebtrader.com/*",
+        "http://ftswebtrader1.com/*",
+        "http://www.ftswebtrader1.com/*",
+        "http://ftswebmarket.com/*",
+        "http://www.ftswebmarket.com/*",
+        "http://95.217.196.212/*"
+      ],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "http://ftswebtrader.com/*",
+        "http://www.ftswebtrader.com/*",
+        "http://ftswebtrader1.com/*",
+        "http://www.ftswebtrader1.com/*",
+        "http://ftswebmarket.com/*",
+        "http://www.ftswebmarket.com/*",
+        "http://95.217.196.212/*"
+      ],
+      "js": ["relay.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED",
+      "all_frames": true
+    }
+  ]
+}

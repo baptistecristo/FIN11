@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>FTS Live Tape</title>
+<style>
+  body {
+    font: 13px/1.5 system-ui, sans-serif;
+    margin: 0;
+    padding: 14px;
+    width: 250px;
+    color: #1a1a1a;
+    background: #fff;
+  }
+  h1 { font-size: 13px; margin: 0 0 10px; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; }
+  dt { color: #666; }
+  dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+  .err { color: #b42318; }
+  .ok { color: #1a7f37; }
+  p { margin: 12px 0 0; color: #666; font-size: 12px; }
+  a { color: #0b5cd5; }
+</style>
+<h1>FTS Live Tape — capture</h1>
+<dl>
+  <dt>Frames sent</dt><dd id="posted">–</dd>
+  <dt>Queued</dt><dd id="queued">–</dd>
+  <dt>Dropped</dt><dd id="failures">–</dd>
+  <dt>Hub</dt><dd id="hub">–</dd>
+</dl>
+<p id="hint"></p>
+<p><a href="http://127.0.0.1:8787" target="_blank">Open viewer</a></p>
+<script src="popup.js"></script>
