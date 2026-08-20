@@ -8,19 +8,22 @@
 // left is the open and right is the bell.
 
 const CAP = 25000; // Server-enforced price cap.
+const FONT = '11px "Segoe UI", system-ui, sans-serif';
 
 const COLOR = {
-  grid: '#1f2434',
-  gridText: '#6d7690',
-  line: '#e8ebf4',
-  dot: '#aeb6c9',
-  up: '#3fbf7f',
-  down: '#ef5b64',
-  amber: '#f0a03c',
-  ground: '#10131c',
+  grid: '#eef1f4',
+  axis: '#d3d9e0',
+  gridText: '#8b95a3',
+  line: '#16191f',
+  dot: '#8b95a3',
+  up: '#00914f',
+  down: '#d92d20',
+  blue: '#0a5ed7',
+  ground: '#ffffff',
 };
 
-const PAD = { top: 12, right: 66, bottom: 22, left: 10 };
+// Room on the right for the price axis and the last-price flag.
+const PAD = { top: 12, right: 74, bottom: 22, left: 10 };
 
 function niceTicks(min, max, count) {
   const span = max - min;
@@ -107,7 +110,7 @@ export function drawChart(canvas, state) {
   const y = (price) => PAD.top + plotH * (1 - (price - lo) / (hi - lo));
 
   // --- grid and price axis -------------------------------------------------
-  ctx.font = '11px ui-monospace, Consolas, monospace';
+  ctx.font = FONT;
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 1;
   for (const v of niceTicks(lo, hi, 5)) {
@@ -135,6 +138,14 @@ export function drawChart(canvas, state) {
     ctx.fillText(`${minute}m`, px, cssH - PAD.bottom / 2);
   }
 
+  ctx.strokeStyle = COLOR.axis;
+  ctx.beginPath();
+  ctx.moveTo(PAD.left + plotW + 0.5, PAD.top);
+  ctx.lineTo(PAD.left + plotW + 0.5, PAD.top + plotH);
+  ctx.moveTo(PAD.left, PAD.top + plotH + 0.5);
+  ctx.lineTo(PAD.left + plotW, PAD.top + plotH + 0.5);
+  ctx.stroke();
+
   ctx.save();
   ctx.beginPath();
   ctx.rect(PAD.left, PAD.top, plotW, plotH);
@@ -145,16 +156,15 @@ export function drawChart(canvas, state) {
     const py = Math.round(y(CAP)) + 0.5;
     ctx.save();
     ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = COLOR.amber;
-    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = COLOR.gridText;
     ctx.beginPath();
     ctx.moveTo(PAD.left, py);
     ctx.lineTo(PAD.left + plotW, py);
     ctx.stroke();
     ctx.restore();
-    ctx.fillStyle = COLOR.amber;
+    ctx.fillStyle = COLOR.gridText;
     ctx.textAlign = 'left';
-    ctx.fillText('cap', PAD.left + 4, py + 9);
+    ctx.fillText('cap 25,000', PAD.left + 4, py + 9);
   }
 
   // --- the curve -----------------------------------------------------------
@@ -200,12 +210,15 @@ export function drawChart(canvas, state) {
     const px = Math.round(x(fill.clock)) + 0.5;
     const py = y(fill.price);
 
+    // A dashed stem, not a solid rule: it has to be findable without competing
+    // with the time gridlines behind it.
     ctx.save();
-    ctx.strokeStyle = COLOR.amber;
-    ctx.globalAlpha = 0.3;
+    ctx.strokeStyle = COLOR.blue;
+    ctx.globalAlpha = 0.35;
+    ctx.setLineDash([2, 3]);
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(px, PAD.top);
+    ctx.moveTo(px, py);
     ctx.lineTo(px, PAD.top + plotH);
     ctx.stroke();
     ctx.restore();
@@ -223,18 +236,18 @@ export function drawChart(canvas, state) {
       ctx.lineTo(px - r, py - r * 0.8);
     }
     ctx.closePath();
-    ctx.fillStyle = COLOR.amber;
+    ctx.fillStyle = COLOR.blue;
     ctx.fill();
     ctx.strokeStyle = COLOR.ground;
     ctx.lineWidth = 1.6;
     ctx.stroke();
 
-    ctx.font = 'bold 10px ui-monospace, Consolas, monospace';
-    ctx.fillStyle = COLOR.amber;
+    ctx.font = 'bold 10px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = COLOR.blue;
     ctx.textAlign = 'center';
     const label = `${fill.side === 'buy' ? '+' : '−'}${fill.qty}`;
     ctx.fillText(label, px, fill.side === 'buy' ? py - r - 7 : py + r + 12);
-    ctx.font = '11px ui-monospace, Consolas, monospace';
+    ctx.font = FONT;
   }
 
   ctx.restore();
@@ -250,7 +263,7 @@ export function drawChart(canvas, state) {
     if (to > from) {
       ctx.save();
       ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = 'rgba(232, 235, 244, 0.35)';
+      ctx.strokeStyle = 'rgba(22, 25, 31, 0.28)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(from, py);
@@ -259,8 +272,20 @@ export function drawChart(canvas, state) {
       ctx.restore();
     }
     ctx.beginPath();
-    ctx.arc(to, py, 3.4, 0, Math.PI * 2);
+    ctx.arc(to, py, 3, 0, Math.PI * 2);
     ctx.fillStyle = COLOR.line;
     ctx.fill();
+
+    // Last price flagged against the axis, as a platform would show it.
+    const text = formatTick(latest.price);
+    ctx.font = 'bold ' + FONT;
+    const w = ctx.measureText(text).width + 10;
+    const flagY = Math.max(PAD.top + 8, Math.min(PAD.top + plotH - 8, py));
+    ctx.fillStyle = state.lastTick > 0 ? COLOR.up : state.lastTick < 0 ? COLOR.down : COLOR.line;
+    ctx.fillRect(PAD.left + plotW + 4, flagY - 9, w, 18);
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'left';
+    ctx.fillText(text, PAD.left + plotW + 9, flagY);
+    ctx.font = FONT;
   }
 }

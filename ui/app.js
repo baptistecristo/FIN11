@@ -6,8 +6,11 @@ const $ = (id) => document.getElementById(id);
 
 const el = {
   feed: $('feed'), feedLabel: $('feed-label'), mode: $('mode'), security: $('security'),
-  countdown: $('countdown'), bidWho: $('bid-who'), askWho: $('ask-who'),
+  countdown: $('countdown'), countdownBox: null,
+  bidWho: $('bid-who'), askWho: $('ask-who'),
   chart: $('chart'), chartEmpty: $('chart-empty'), lastReadout: $('last-readout'),
+  change: $('change'), sessionHigh: $('session-high'), sessionLow: $('session-low'),
+  tradeCount: $('trade-count'),
   gutterSpent: $('gutter-spent'), gutterFlat: $('gutter-flat'), gutterNote: $('gutter-note'),
   tape: $('tape'), tapeScroll: $('tape-scroll'), tapeHead: $('tape-head'), tapeEmpty: $('tape-empty'),
   hold: $('hold'), resume: $('resume'),
@@ -15,6 +18,7 @@ const el = {
   fillCount: $('fill-count'),
   frames: $('frames'), notice: $('notice'),
 };
+el.countdownBox = el.countdown.closest('.acct');
 
 // Liquidation horizon: be flat with this much of the session left. Bottles are
 // worth zero at the bell, so the last minutes are where sellers get trapped.
@@ -49,24 +53,8 @@ const fmt = (v, dp = 2) =>
     ? '—'
     : v.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
 
-// Integer part at full weight, decimals stepped down. Applied to every figure.
 function setFigure(node, value, dp = 2) {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    node.textContent = '—';
-    return;
-  }
-  const text = fmt(value, dp);
-  const dot = text.lastIndexOf('.');
-  if (dot === -1 || dp === 0) {
-    node.textContent = text;
-    return;
-  }
-  node.textContent = '';
-  node.append(text.slice(0, dot));
-  const frac = document.createElement('span');
-  frac.className = 'frac';
-  frac.textContent = text.slice(dot);
-  node.append(frac);
+  node.textContent = fmt(value, dp);
 }
 
 // Game clock to minutes:seconds. One clock unit is one second of real time.
@@ -217,8 +205,8 @@ for (const button of document.querySelectorAll('.tab')) {
 
 function paintStatus() {
   const replay = state.mode === 'replay';
-  // Never say "live" over replayed data — the whole point of the badge is to
-  // tell you at a glance whether what you are watching is really happening.
+  // Never say "live" over replayed data — the badge exists to tell you at a
+  // glance whether what you are watching is really happening.
   if (state.connected) {
     el.feed.dataset.state = replay ? 'replay' : 'live';
     el.feedLabel.textContent = replay ? 'Replay' : 'Live';
@@ -227,7 +215,6 @@ function paintStatus() {
     el.feedLabel.textContent = state.frames > 0 ? 'Stale' : 'Waiting';
   }
   el.mode.hidden = !replay;
-  el.mode.textContent = 'not a live market';
   el.frames.textContent = `${state.frames.toLocaleString('en-US')} frames`;
   if (state.security) el.security.textContent = state.security;
 }
@@ -237,7 +224,7 @@ function paintClock() {
 
   const flatAt = state.total * FLAT_BY_FRACTION;
   const urgent = state.clock !== null && state.clock <= flatAt;
-  el.countdown.classList.toggle('is-urgent', urgent);
+  el.countdownBox.classList.toggle('is-urgent', urgent);
 
   const spent = state.clock === null ? 0 : Math.min(100, Math.max(0, ((state.total - state.clock) / state.total) * 100));
   el.gutterSpent.style.width = `${spent}%`;
@@ -259,19 +246,43 @@ function paintAccount() {
 }
 
 function paintTopOfBook() {
-  const name = (q) => (q && q.trader ? q.trader : q ? 'unnamed' : '—');
-  el.bidWho.textContent = name(state.best.bid);
-  el.askWho.textContent = name(state.best.ask);
+  const show = (q) => (q ? `${fmt(q.price)} × ${q.qty ?? '?'}  ${q.trader ?? 'unnamed'}` : '—');
+  el.bidWho.textContent = show(state.best.bid);
+  el.askWho.textContent = show(state.best.ask);
 }
 
 function paintLast() {
+  el.tradeCount.textContent = state.points.length.toLocaleString('en-US');
+
   if (state.lastPrice === null) {
     el.lastReadout.textContent = '—';
+    el.change.textContent = '';
     return;
   }
-  setFigure(el.lastReadout, state.lastPrice);
+  el.lastReadout.textContent = fmt(state.lastPrice);
   el.lastReadout.classList.toggle('is-up', state.lastTick > 0);
   el.lastReadout.classList.toggle('is-down', state.lastTick < 0);
+
+  let high = -Infinity;
+  let low = Infinity;
+  for (const p of state.points) {
+    if (p.price > high) high = p.price;
+    if (p.price < low) low = p.price;
+  }
+  el.sessionHigh.textContent = Number.isFinite(high) ? fmt(high) : '—';
+  el.sessionLow.textContent = Number.isFinite(low) ? fmt(low) : '—';
+
+  // Measured from the first print of the session, since there is no prior close.
+  const open = state.points.length ? state.points[0].price : null;
+  if (open === null || open === 0) {
+    el.change.textContent = '';
+    return;
+  }
+  const diff = state.lastPrice - open;
+  const pct = (diff / open) * 100;
+  el.change.textContent = `${diff >= 0 ? '+' : ''}${fmt(diff)}  ${diff >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+  el.change.classList.toggle('is-up', diff > 0);
+  el.change.classList.toggle('is-down', diff < 0);
 }
 
 // One paint per frame regardless of how many events landed, so a burst cannot

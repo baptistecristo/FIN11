@@ -1,123 +1,126 @@
-# FIN11 — Genie bottles
+# FIN11: Genie bottles
 
-Tools for the NHH FIN11 trading sessions: a live viewer for the market, and
-eventually a bot.
+A live viewer for the NHH FIN11 trading sessions. It shows every filled trade as it
+prints, and draws a price curve that gains one point per fill.
 
-## The competition, briefly
-
-Once per session the class trades a single made-up asset — "Genie bottles" — against
-each other on [FTS Web Trader](http://ftswebtrader.com/), a browser-based market
-simulator. Everyone sees one shared order book and trades into it in real time.
-
-The rules that matter:
-
-| | |
-|---|---|
-| **Length** | 50 real minutes, shown as a game clock counting down from 3000 |
-| **Starting position** | ~20 bottles, and 0 cash (you may borrow, interest-free) |
-| **Buying** | costs money, and gives you *utility* — a private value `Vt` per bottle |
-| **Selling** | gives you money |
-| **Short selling** | not allowed |
-| **At the bell** | **bottles are worth nothing** |
-
-You are ranked on:
-
-```
-total gain  =  cash  +  realized utility  +  0 × bottles
-```
-
-That last term is the whole game. Bottles pay you nothing at the end, so anything
-still in your account when the clock hits zero is value you destroyed. `Vt` is only
-worth about 2, which is trivial next to prices that ran to the server's 25,000 cap —
-so in practice the winning move is not clever buying, it is **selling your endowment
-into the bubble before everyone else tries to**.
-
-Traders are split into 5 types. Everyone within a type shares the same private value
-and the same starting bottles, and you are ranked against your own type.
-
-## My results
-
-| Session | Date | Rank | Cash at close | Bottles left | Notes |
-|---|---|---|---|---|---|
-| Trading #1 | 2026-08-18 | 14th of ~40 | 161,859.60 | 0 | Sold all 20 bottles near the cap and finished flat, which is the right shape. Too slow into the top. |
-| Trading #2 | — | — | — | — | |
-| Trading #3 | — | — | — | — | |
-
-<sub>Session 1 rank is from memory and worth re-checking against the posted results.</sub>
-
-**What I'd do differently:** being flat at the close was right, but I sold too gradually
-into a market that kept running to the cap. The viewer below exists mostly to fix that —
-to watch the top form instead of guessing at it.
-
-The screenshot below is synthetic test data; the names in it are invented.
-
-## The viewer
-
-A read-only window that shows every filled trade as it prints, and draws the price
-curve one point per fill.
-
-![the viewer](docs/viewer.jpg)
-
-- **Fills tape** — every trade, newest first. Green is an uptick, red a downtick;
-  that comes straight off the server's `lastTick` field, not from anything inferred.
-- **Your own fills** — highlighted amber and mixed into the same stream, so you never
-  have to switch tabs to see what you just did.
-- **Resting column** — the server never names the parties to a trade. It does name
-  whoever is on top of the book, so this shows who was resting at the price that
-  printed. Prefixed with `~` because it is an inference, not a fact from the wire.
-- **Expiry gutter** — the bar under the chart draining left to right, with a marker
-  for where you should already be flat. Time is the thing that kills you in this game,
-  so it gets its own axis.
-
-**It cannot place orders.** It never touches the page's `mSubmitBid` / `mHitAsk`
-functions, which means it also cannot trigger the blocking `alert()` that makes
-automating this site risky. The bot, when it exists, will be a separate program.
-
-### Running it
+![The viewer: fills tape on the left, price curve on the right](docs/viewer.jpg)
+<sub>Synthetic test data. The trader names are invented.</sub>
 
 ```powershell
 .\scripts\start.ps1
 ```
 
-That starts the local hub and opens the viewer in its own window. Then, once only:
+Opens in its own window. Load `extension\` once from `chrome://extensions` (Developer
+mode, then Load unpacked), and trade in your normal browser as usual.
 
-1. Go to `chrome://extensions`, turn on **Developer mode**
-2. **Load unpacked** → select the `extension\` folder
-3. Open [ftswebtrader.com](http://ftswebtrader.com/) and log in as usual
+## The game
 
-Trade in your normal browser. The extension listens to the market feed and forwards
-it to the viewer; it re-attaches itself on every page load, so a refresh mid-session
-costs you nothing.
+The class trades one made-up asset against each other for 50 minutes. You start with
+about 20 bottles and no cash. At the bell, bottles are worth **nothing**:
 
-### Trying it without a live market
+```
+total gain  =  cash  +  realized utility  +  0 × bottles
+```
+
+So the whole thing is a race to sell your endowment into the bubble before everyone
+else does.
+
+## Results
+
+| Session | Rank | Cash at close | Bottles left |
+|---|---|---|---|
+| #1, 18 Aug 2026 | 14th of ~40 | 161,859.60 | 0 |
+| #2 | | | |
+| #3 | | | |
+
+Session 1: I finished flat, which was right, but sold in clips too small for a market
+that kept running to the 25,000 cap. Rank is from memory, worth re-checking.
+
+---
+
+<details>
+<summary><b>Reading the screen</b></summary>
+
+- **Fills tape.** Every trade, newest first. The arrow carries the tick direction and
+  comes off the server's `lastTick` field. Nothing else in the tape is coloured.
+- **Yours.** Blue, and mixed into the same stream, so you never switch tabs to see what
+  you just did.
+- **Resting.** The server never names the parties to a trade. It does name whoever sits
+  on top of the book, so this column shows who was resting at the price that printed.
+  The `~` marks it as an inference.
+- **Session bar.** How much of the 50 minutes has gone, with a red mark for where you
+  should already be flat.
+
+**It cannot place orders.** It never touches the page's `mSubmitBid` or `mHitAsk`
+functions, so it also cannot trigger the blocking `alert()` that makes automating this
+site risky. A test asserts those names appear nowhere in the injected code.
+
+</details>
+
+<details>
+<summary><b>Running it without a live market</b></summary>
 
 ```powershell
 .\scripts\start.ps1 -Replay ..\Downloads\genie_orderbook_full.json -Speed 30
 ```
 
-Replays the captured Session 1 data through the same pipeline. Or, against a running
-hub, `node scripts\smoke.js` feeds a synthetic session including fills of your own.
+Replays the captured Session 1 data. Against a running hub, `node scripts\smoke.js`
+feeds a synthetic session that includes fills of your own.
 
-There is also a live demo market on the FTS site ("Connect to B02 Demo") which
-exercises the whole chain on real traffic without touching the ranked competition.
+Before a real session, run it once against the live B02 demo market ("Connect to B02
+Demo" on the FTS site). That is the only check that exercises the real feed end to end,
+and it touches nothing in the ranked competition.
 
-## Layout
+</details>
+
+<details>
+<summary><b>How the capture works</b></summary>
+
+The protocol came from reading the FTS client source rather than from guessing at
+captured traffic.
+
+**The socket is an implicit global.** The page runs `ws = new WebSocket(url)` with no
+`var` in scope, so it lands on `window`. It only appears once you click connect, and it
+gets replaced on reconnect. The extension patches the `WebSocket` constructor at
+`document_start` instead, catching every socket the page opens.
+
+**Frames arrive batched.** `onmessage` receives a JSON *array* of messages. A listener
+that assumes a single object drops most of the feed.
+
+| header | carries |
+|---|---|
+| `lasttrade` | price, size, and `lastTick`, the tick direction |
+| `bestbid` / `bestask` | price, size, and `displayName`, the only place names appear |
+| `cash` / `endow` | your money and your position, pushed on every change |
+| `info` | your private value `Vt` |
+| `time` / `startperiod` | the game clock, and the session length |
+
+**The server never sends your own fills.** No inbound fill message, no blotter in the
+page. The hub reconstructs each fill from the deltas: `Δposition` gives the size,
+`Δcash ÷ Δposition` gives the price. Those two legs arrive separately, so the hub waits
+for both. Pricing off the first leg alone gives you zero.
+
+</details>
+
+<details>
+<summary><b>Layout and tests</b></summary>
 
 ```
-hub/          local server: receives the feed, records it, serves the viewer
-extension/    Chrome extension that captures the market feed (read-only)
+hub/          receives the feed, records it, serves the viewer
+extension/    captures the market feed (read-only)
 ui/           the viewer window
-scripts/      launcher and a synthetic feed for testing
-data/         recorded sessions (git-ignored)
-docs/         design notes
+scripts/      launcher, and a synthetic feed for testing
+data/         recorded sessions (git-ignored, these hold real names)
 ```
 
-Every message is written to `data/raw-<timestamp>.jsonl` the moment it arrives.
-Session 1 lost its last 21 minutes — the top, the crash and the close — to a page
-refresh that wiped an in-memory buffer, and that must not happen twice.
+The hub writes every message to `data/raw-<timestamp>.jsonl` the moment it arrives,
+before anything parses it. A page refresh wiped an in-memory buffer in Session 1 and
+cost the last 21 minutes: the top, the crash, the close.
 
 ```powershell
-npm test      # protocol parsing, fill reconstruction, the capture hook
+npm test
 ```
 
 No dependencies. Node 20+.
+
+</details>

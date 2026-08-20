@@ -8,103 +8,78 @@
 </head>
 <body>
 
-<header class="bar">
-  <span class="feed" id="feed" data-state="waiting"><i></i><b id="feed-label">Waiting</b></span>
-  <h1 id="security">Genie bottle</h1>
-  <span class="mode" id="mode" hidden>not a live market</span>
-
-  <div class="bar-clock">
-    <span class="micro">To the bell</span>
-    <span class="clock countdown" id="countdown">—</span>
-  </div>
+<!-- Account strip. Trading platforms put the money above the instrument,
+     because it applies to everything below it. -->
+<header class="account-bar">
+  <div class="acct"><span>Cash</span><b id="cash">—</b></div>
+  <div class="acct"><span>Bottles</span><b id="position">—</b></div>
+  <div class="acct"><span>Value V<sub>t</sub></span><b id="vt">—</b></div>
+  <div class="acct"><span>Your fills</span><b id="fill-count">—</b></div>
+  <div class="acct acct-total"><span>Total gain</span><b id="total">—</b></div>
+  <div class="acct acct-clock"><span>To the bell</span><b id="countdown">—</b></div>
+  <div class="acct-note" id="notice"></div>
+  <div class="acct-state"><i id="feed" data-state="waiting"></i><span id="feed-label">Waiting</span></div>
 </header>
+
+<div class="instrument">
+  <h1 id="security">Genie bottle</h1>
+  <span class="last" id="last-readout">—</span>
+  <span class="chg" id="change"></span>
+  <span class="hl">H <b id="session-high">—</b></span>
+  <span class="hl">L <b id="session-low">—</b></span>
+  <span class="hl">Fills <b id="trade-count">0</b></span>
+  <span class="badge" id="mode" hidden>Replay</span>
+</div>
 
 <main>
   <section class="tape-pane">
     <div class="tabs" role="tablist">
       <button role="tab" class="tab is-on" data-tape="market" aria-selected="true">All fills</button>
-      <button role="tab" class="tab" data-tape="mine" aria-selected="false">Yours only</button>
-      <button role="tab" class="tab" data-tape="raw" aria-selected="false">Raw feed</button>
+      <button role="tab" class="tab" data-tape="mine" aria-selected="false">Yours</button>
+      <button role="tab" class="tab" data-tape="raw" aria-selected="false">Feed</button>
       <button class="hold" id="hold" aria-pressed="false" title="Stop the tape so it does not scroll away while you read">Hold</button>
     </div>
 
-    <!-- Names are only ever certain on quotes, so who is on top of the book is
-         shown as fact here, while per-fill names below are marked inferred. -->
-    <div class="top-of-book">
-      <span class="tob tob-bid"><span class="micro">Bid</span><b id="bid-who">—</b></span>
-      <span class="tob tob-ask"><span class="micro">Ask</span><b id="ask-who">—</b></span>
+    <div class="quotes">
+      <span class="q q-bid">Bid <b id="bid-who">—</b></span>
+      <span class="q q-ask">Ask <b id="ask-who">—</b></span>
     </div>
 
     <div class="tape-head" id="tape-head">
-      <span>Clock</span><span>Resting</span><span>Price</span><span>Qty</span><span></span>
+      <span>Clock</span><span>Resting</span><span>Price</span><span>Size</span><span></span>
     </div>
 
     <div class="tape-scroll" id="tape-scroll">
       <ol class="tape" id="tape"></ol>
-      <p class="tape-empty" id="tape-empty">No fills yet. Yours appear highlighted in this stream.</p>
+      <p class="tape-empty" id="tape-empty">No fills yet.</p>
     </div>
 
     <button class="resume" id="resume" hidden>0 new — release hold</button>
   </section>
 
   <section class="chart-pane">
-    <div class="chart-head">
-      <span class="micro">Traded price</span>
-      <div class="legend">
-        <span class="key key-last">Every fill</span>
-        <span class="key key-mine">Yours</span>
-        <span class="key key-cap">Cap</span>
-      </div>
-      <span class="last-readout" id="last-readout">—</span>
-    </div>
-
     <div class="canvas-wrap">
       <canvas id="chart"></canvas>
-      <p class="chart-empty" id="chart-empty">No fills yet. The curve draws itself one point per trade.</p>
+      <p class="chart-empty" id="chart-empty">No fills yet. The curve draws one point per trade.</p>
     </div>
 
-    <!-- Expiry gutter: shares the chart's x-axis. Bottles are worth zero at the
-         bell, so the session burning down is the decision, not background info. -->
-    <div class="gutter" id="gutter" aria-hidden="true">
-      <div class="gutter-spent" id="gutter-spent"></div>
-      <div class="gutter-flat" id="gutter-flat"><span>be flat</span></div>
+    <div class="session-bar">
+      <span class="sb-label">Open</span>
+      <div class="sb-track">
+        <div class="sb-done" id="gutter-spent"></div>
+        <div class="sb-mark" id="gutter-flat" title="Be flat by here"></div>
+      </div>
+      <span class="sb-label">Bell</span>
     </div>
-    <div class="gutter-labels">
-      <span class="micro">Open</span>
-      <span class="micro" id="gutter-note">Bottles expire worthless at the bell</span>
-      <span class="micro">Bell</span>
-    </div>
-  </section>
-
-  <section class="account-pane">
-    <div class="stat">
-      <span class="micro">Cash</span>
-      <span class="figure" id="cash">—</span>
-    </div>
-    <div class="stat">
-      <span class="micro">Bottles</span>
-      <span class="figure" id="position">—</span>
-    </div>
-    <div class="stat">
-      <span class="micro">Value <i>V</i><sub>t</sub></span>
-      <span class="figure" id="vt">—</span>
-    </div>
-    <div class="stat stat-mine">
-      <span class="micro">Your fills</span>
-      <span class="figure" id="fill-count">—</span>
-    </div>
-    <div class="stat stat-total">
-      <span class="micro">Total gain — cash + realized utility</span>
-      <span class="figure" id="total">—</span>
-    </div>
+    <p class="sb-note" id="gutter-note">Bottles expire worthless at the bell</p>
   </section>
 </main>
 
-<footer class="bar bar-foot">
+<footer class="status-bar">
   <span id="frames">0 frames</span>
-  <span id="recording">Recording every message to data/</span>
-  <span class="grow" id="notice"></span>
-  <span class="readonly">Read-only — this window cannot place orders</span>
+  <span id="recording">Recording to data/</span>
+  <span class="grow"></span>
+  <span>Read-only — this window cannot place orders</span>
 </footer>
 
 <script type="module" src="app.js"></script>
