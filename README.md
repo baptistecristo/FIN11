@@ -47,9 +47,13 @@ that kept running to the 25,000 cap. Rank is from memory, worth re-checking.
   comes off the server's `lastTick` field. Nothing else in the tape is coloured.
 - **Yours.** Blue, and mixed into the same stream, so you never switch tabs to see what
   you just did.
-- **Resting.** The server never names the parties to a trade. It does name whoever sits
-  on top of the book, so this column shows who was resting at the price that printed.
-  The `~` marks it as an inference.
+- **Resting.** The server never names the parties to a trade, but it does identify
+  whoever sits on top of the book, so this column shows who was resting at the price
+  that printed. The `~` marks it as an inference.
+
+  **Shown as initials only.** Classmates' full names are not ours to put on a screen
+  that gets screenshotted, so the viewer reduces them and the local log keeps the
+  original. Nothing identifying anyone has ever been committed to this repository.
 - **Session bar.** How much of the 50 minutes has gone, with a red mark for where you
   should already be flat.
 
@@ -251,7 +255,7 @@ that assumes a single object drops most of the feed.
 | header | carries |
 |---|---|
 | `lasttrade` | price, size, and `lastTick`, the tick direction |
-| `bestbid` / `bestask` | price, size, and `displayName`, the only place names appear |
+| `bestbid` / `bestask` | price, size, and `displayName`, the only place traders are identified |
 | `cash` / `endow` | your money and your position, pushed on every change |
 | `info` | your private value `Vt` |
 | `time` / `startperiod` | the game clock, and the session length |
@@ -274,7 +278,7 @@ extension/    captures the market feed, and (only when armed) sends orders
   execute.js    the one file that can place an order
 ui/           the viewer window
 scripts/      launcher, a synthetic feed, and the backtester
-data/         recorded sessions (git-ignored, these hold real names)
+data/         recorded sessions (git-ignored: these identify real classmates)
 ```
 
 The hub writes every message to `data/raw-<timestamp>.jsonl` the moment it arrives,

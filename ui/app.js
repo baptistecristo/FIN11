@@ -62,6 +62,19 @@ function setFigure(node, value, dp = 2) {
   node.textContent = fmt(value, dp);
 }
 
+// Trader identities are shown as initials, never in full.
+//
+// The feed names whoever is on top of the book, and knowing which classmate is
+// quoting is genuinely useful. Their full names are not ours to put on a screen
+// that gets screenshotted and shared, so the display reduces them and the raw
+// log on disk keeps the original.
+function initials(name) {
+  if (!name) return null;
+  const parts = String(name).split(/[.\s_@-]+/).filter(Boolean);
+  if (parts.length === 0) return null;
+  return `${parts.slice(0, 3).map((part) => part[0].toUpperCase()).join('.')}.`;
+}
+
 // Game clock to minutes:seconds. One clock unit is one second of real time.
 function asTime(units) {
   if (units === null || units === undefined) return '—';
@@ -90,7 +103,7 @@ function rowMarket(trade) {
   setFigure(px, trade.price);
   // The server never names the parties to a trade. This is whoever was resting
   // at the price, so it is shown dimmed and prefixed to read as an inference.
-  const who = cell('who', trade.restingTrader ? `~${trade.restingTrader}` : '');
+  const who = cell('who', trade.restingTrader ? `~${initials(trade.restingTrader)}` : '');
   if (trade.restingSide) who.classList.add(`who-${trade.restingSide}`);
   li.append(
     cell('clk', trade.clock ?? '—'),
@@ -391,7 +404,7 @@ function paintExecution() {
 
 
 function paintTopOfBook() {
-  const show = (q) => (q ? `${fmt(q.price)} × ${q.qty ?? '?'}  ${q.trader ?? 'unnamed'}` : '—');
+  const show = (q) => (q ? `${fmt(q.price)} × ${q.qty ?? '?'}  ${initials(q.trader) ?? 'unnamed'}` : '—');
   el.bidWho.textContent = show(state.best.bid);
   el.askWho.textContent = show(state.best.ask);
 }
