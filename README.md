@@ -62,29 +62,53 @@ site risky. A test asserts those names appear nowhere in the injected code.
 <summary><b>The strategy panel</b></summary>
 
 Three strategies run all session on their own paper portfolios, seeded from your real
-account at the open, and scored on the same formula the class is ranked by. The panel
-shows each one's gain, how it is doing against you, and a sparkline of its session.
+account at the open and scored on the formula the class is ranked by.
+
+They are built around what Session 1 actually did. From the captured book: the market
+pinned at the 25,000 cap from **minute 19.6** onward and was still there nine minutes
+later when the capture ended, with a bid for **8,687 bottles** sitting at the cap.
+Liquidity was never the constraint. The realised average that day was 8,093 a bottle
+against 25,000 available for ten minutes straight.
+
+So the mistake was not being late to the exit. It was selling cheap into a market
+pinned at its own hard maximum. That gives one rule that needs no market reading at
+all: **25,000 is enforced by the server, so no higher price can ever print.** Once the
+best bid touches it, holding has no upside left and a retreating bid is a real risk.
+All three strategies share that rule and differ only on the way up.
 
 | | |
 |---|---|
-| **Ladder out** | Sells a steady clip on a schedule, ignoring price. The control. |
-| **Hold to cap** | Holds for the top, then dumps once price stalls near 25,000. |
-| **Sell on reversal** | Rides the move, unloads in clips on the first sustained turn. |
+| **Cap strike** | Waits for the bid to reach the cap, then sells the lot. Rests an ask under the cap meanwhile. |
+| **Ratchet** | Refuses to sell below 40% of the cap, and every clip must beat the last sale by 35%. |
+| **Trailing peak** | Holds through the climb, sells everything once price breaks 4% off its session high. |
 
-They are scaffolding, not researched edges. Every number that shapes their behaviour
-sits at the top of `hub/strategies/registry.js`.
+None of them buy: buying pays `Vt` (about 2) against a price in the thousands, so every
+purchase destroys value. Every number that shapes behaviour sits at the top of
+`hub/strategies/registry.js`.
 
-**The fill model is deliberately pessimistic.** A taking order fills at the quoted
-price and only for the size actually quoted. A resting order fills only when a print
-goes *through* its price, never merely at it, because at your own price you are behind
-the queue that was already there. An optimistic model would have shown all three
-strategies filling instantly at the cap in Session 1 and made every one of them look
-brilliant.
+Backtested on the Session 1 capture with `node scriptsacktest.js`:
+
+| strategy | total gain | avg/bottle |
+|---|---|---|
+| Cap strike | 499,980 | 24,999 |
+| Trailing peak | 499,980 | 24,999 |
+| Ratchet | 494,985 | 24,749 |
+| *Session 1 actual* | *161,860* | *8,093* |
+
+Treat that as the exit only. The export begins at minute 19.4 with price already at
+24,000, so the whole build-up is missing and the three cannot be ranked against each
+other on it.
+
+**The fill model is deliberately pessimistic.** A taking order fills at the quoted price
+and only for the size quoted. A resting order fills only when a print goes *through* its
+price, never merely at it, because at your own price you are behind the queue that was
+already there. It also cannot model queue position or your own market impact, so use the
+panel to rank strategies against each other rather than to predict your actual take.
 
 Clicking a card selects it and shows what it would do right now. **Nothing is sent.**
-Execution is not built: the FTS order functions raise a blocking `alert()` on their
-error paths, which freezes browser automation entirely, and that wants a kill switch
-and a written set of rules first.
+Execution is not built: the FTS order functions raise a blocking `alert()` on their error
+paths, which freezes browser automation entirely, and that wants a kill switch and a
+written set of rules first.
 
 </details>
 
@@ -141,7 +165,7 @@ hub/          receives the feed, records it, serves the viewer
   strategies/   paper portfolios and the fill model
 extension/    captures the market feed (read-only)
 ui/           the viewer window
-scripts/      launcher, and a synthetic feed for testing
+scripts/      launcher, a synthetic feed, and the backtester
 data/         recorded sessions (git-ignored, these hold real names)
 ```
 
