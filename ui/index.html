@@ -80,6 +80,17 @@
       <em>paper only</em>
     </div>
     <div class="strat-list" id="strategies"></div>
+    <div class="exec" id="exec" data-state="off">
+      <div class="exec-row">
+        <span class="exec-label" id="exec-label">Not sending orders</span>
+        <span class="exec-count" id="exec-count"></span>
+      </div>
+      <button class="exec-btn" id="exec-btn" type="button" disabled>Select a strategy first</button>
+      <p class="exec-note" id="exec-note">
+        Sending also needs the extension armed from its own popup. Press Esc to stop.
+      </p>
+    </div>
+
     <div class="strat-you">
       <span>You</span><b id="strat-you-gain">—</b>
     </div>
@@ -90,7 +101,7 @@
   <span id="frames">0 frames</span>
   <span id="recording">Recording to data/</span>
   <span class="grow"></span>
-  <span>Read-only — this window cannot place orders</span>
+  <span id="exec-footer">Not sending orders</span>
 </footer>
 
 <script type="module" src="app.js"></script>

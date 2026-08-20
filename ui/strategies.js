@@ -68,7 +68,9 @@ function buildCard(summary, currentSelected) {
   title.textContent = summary.name;
   const rank = document.createElement('span');
   rank.className = 'rank';
-  top.append(title, rank);
+  const key = document.createElement('span');
+  key.className = 'key';
+  top.append(key, title, rank);
 
   const blurb = document.createElement('p');
   blurb.className = 'blurb';
@@ -107,7 +109,7 @@ function buildCard(summary, currentSelected) {
     toggle();
   });
 
-  cards.set(summary.id, { card, rank, gain, delta, spark, fills, pos, resting, use, intents });
+  cards.set(summary.id, { card, key, rank, gain, delta, spark, fills, pos, resting, use, intents });
   return card;
 }
 
@@ -152,10 +154,11 @@ export function paintStrategies(state, els, fmt) {
   const yours = state.cash;
   els.you.textContent = yours === null ? '—' : fmt(yours);
 
-  for (const summary of list) {
+  for (const [index, summary] of list.entries()) {
     const c = cards.get(summary.id);
     if (!c) continue;
     const on = state.selected === summary.id;
+    c.key.textContent = String(index + 1);
 
     c.card.classList.toggle('is-on', on);
     // Only badge a leader once something has actually happened.

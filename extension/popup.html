@@ -3,23 +3,40 @@
 <title>FTS Live Tape</title>
 <style>
   body {
-    font: 13px/1.5 system-ui, sans-serif;
+    font: 13px/1.5 "Segoe UI", system-ui, sans-serif;
     margin: 0;
     padding: 14px;
-    width: 250px;
-    color: #1a1a1a;
+    width: 268px;
+    color: #16191f;
     background: #fff;
   }
   h1 { font-size: 13px; margin: 0 0 10px; }
   dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; }
-  dt { color: #666; }
+  dt { color: #8b95a3; }
   dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
-  .err { color: #b42318; }
-  .ok { color: #1a7f37; }
-  p { margin: 12px 0 0; color: #666; font-size: 12px; }
-  a { color: #0b5cd5; }
+  .err { color: #d92d20; }
+  .ok { color: #00914f; }
+  p { margin: 10px 0 0; color: #5a636f; font-size: 12px; }
+  a { color: #0a5ed7; }
+
+  .arm {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #e8ecf0;
+  }
+  button {
+    width: 100%;
+    padding: 8px;
+    font: 600 12px "Segoe UI", system-ui, sans-serif;
+    border: 1px solid #d3d9e0;
+    background: #fff;
+    cursor: pointer;
+  }
+  button.on { background: #d92d20; border-color: #d92d20; color: #fff; }
+  .warn { color: #d92d20; font-size: 11px; margin-top: 8px; }
 </style>
-<h1>FTS Live Tape — capture</h1>
+
+<h1>FTS Live Tape</h1>
 <dl>
   <dt>Frames sent</dt><dd id="posted">–</dd>
   <dt>Queued</dt><dd id="queued">–</dd>
@@ -27,5 +44,17 @@
   <dt>Hub</dt><dd id="hub">–</dd>
 </dl>
 <p id="hint"></p>
+
+<div class="arm">
+  <dl>
+    <dt>Orders sent</dt><dd id="orders">0</dd>
+  </dl>
+  <button id="arm" type="button">Arm order sending</button>
+  <p class="warn" id="armnote">
+    Off. Nothing can be sent. Arming here is one of two switches; the viewer has
+    the other.
+  </p>
+</div>
+
 <p><a href="http://127.0.0.1:8787" target="_blank">Open viewer</a></p>
 <script src="popup.js"></script>

@@ -15,6 +15,7 @@ import { Tracker, unwrap } from './protocol.js';
 import { loadReplay } from './replay.js';
 import { StrategyBoard } from './strategies/engine.js';
 import { strategies } from './strategies/registry.js';
+import { Execution } from './execution.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '..');
@@ -52,6 +53,16 @@ const board = new StrategyBoard(strategies);
 // Which strategy the user has picked. Selecting one changes what the panel
 // shows and nothing else: no order ever leaves this process.
 let selected = null;
+
+// Order sending. Disarmed at start, disarmed again on restart, and disarmed by
+// its own timer. The extension holds a second switch this cannot reach.
+const execution = new Execution();
+// The armed strategy keeps a separate memory driven by the real account rather
+// than a simulated one: an armed strategy must never size an order off a paper
+// position.
+let liveMemory = {};
+let liveStrategyId = null;
+let myName = null;
 
 const state = {
   mode: replayFile ? 'replay' : 'live',
@@ -114,6 +125,11 @@ function absorb(event) {
     case 'session':
       state.session = event.state;
       if (event.total != null) state.total = event.total;
+      // The bell must never leave order sending switched on.
+      if (event.state === 'end' && execution.armed) {
+        execution.disarm('session ended');
+        log('disarmed: session ended');
+      }
       break;
     case 'trade':
       state.trades.push(event);
@@ -145,6 +161,7 @@ function emit(events) {
     absorb(event);
     broadcast(event);
     board.handle(event);
+    if (execution.armed) considerLiveOrder(event);
   }
   if (events.length) scheduleStrategyBroadcast();
 }
@@ -161,8 +178,63 @@ function scheduleStrategyBroadcast() {
 }
 
 function strategyEvent() {
-  return { t: 'strategies', selected, board: board.summaries };
+  return { t: 'strategies', selected, board: board.summaries, execution: execution.status };
 }
+
+// Runs the armed strategy against the real account and offers what it wants to
+// do to the execution layer, which decides whether any of it may go.
+function considerLiveOrder(event) {
+  const strategy = strategies.find((s) => s.id === execution.strategyId);
+  if (!strategy) return;
+
+  if (liveStrategyId !== strategy.id) {
+    liveStrategyId = strategy.id;
+    liveMemory = strategy.init ? strategy.init({ cash: state.cash, position: state.position }) ?? {} : {};
+  }
+  // Without a known account there is no way to check a sell against what is
+  // actually held, so nothing goes out.
+  if (state.position === null || state.cash === null) return;
+
+  const context = {
+    clock: state.clock,
+    total: state.total,
+    best: state.best,
+    last: tracker.last,
+    vt: state.vt,
+    position: state.position,
+    cash: state.cash,
+    resting: 0,
+    memory: liveMemory,
+    cap: 25000,
+  };
+
+  let intents = [];
+  try {
+    intents = strategy.onEvent(event, context) ?? [];
+  } catch (err) {
+    execution.disarm(`strategy threw: ${err.message}`);
+    log(`disarmed: strategy threw ${err.message}`);
+    broadcast(strategyEvent());
+    return;
+  }
+
+  for (const intent of intents) {
+    const result = execution.offer(intent, { ...context, strategyId: strategy.id, myName });
+    if (result.accepted) {
+      log(`order queued: ${result.order.header} ${result.order.qty ?? ''} @ ${result.order.price ?? ''}`);
+      broadcast({ t: 'order', stage: 'queued', order: result.order });
+    }
+  }
+}
+
+// The arm window is wall-clock, so it has to be checked even when the feed is
+// quiet.
+setInterval(() => {
+  if (execution.tick()) {
+    log('disarmed: window expired');
+    broadcast(strategyEvent());
+  }
+}, 1000).unref();
 
 function statusEvent() {
   return {
@@ -333,10 +405,72 @@ const server = http.createServer(async (req, res) => {
       const { id } = JSON.parse(body);
       // Selecting only changes what the panel shows. Nothing here places an
       // order, and nothing in this process can.
-      selected = id && board.runners.some((r) => r.id === id) ? id : null;
+      const next = id && board.runners.some((r) => r.id === id) ? id : null;
+      // Switching strategies while armed must never hand a live session to a
+      // different strategy without being asked again.
+      if (execution.armed && next !== execution.strategyId) {
+        execution.disarm('strategy changed');
+        log('disarmed: strategy changed');
+      }
+      selected = next;
       log(selected ? `strategy selected: ${selected}` : 'strategy cleared');
       broadcast(strategyEvent());
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, selected }));
+    } catch (err) {
+      res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: String(err.message) }));
+    }
+    return;
+  }
+
+  // Arming. Only ever switched on by an explicit request from the viewer, and
+  // only for the strategy that is currently selected.
+  if (url.pathname === '/arm' && req.method === 'POST') {
+    cors(res);
+    try {
+      const { strategyId, ttlMs } = JSON.parse(await readBody(req, 4096));
+      if (strategyId !== selected) throw new Error('can only arm the selected strategy');
+      execution.arm({ strategyId, ttlMs });
+      log(`ARMED for ${strategyId}, ${Math.round((ttlMs ?? 0) / 1000)}s`);
+      broadcast(strategyEvent());
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, execution: execution.status }));
+    } catch (err) {
+      res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: String(err.message) }));
+    }
+    return;
+  }
+
+  if (url.pathname === '/disarm' && req.method === 'POST') {
+    cors(res);
+    execution.disarm('viewer');
+    log('disarmed by the viewer');
+    broadcast(strategyEvent());
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, execution: execution.status }));
+    return;
+  }
+
+  // The extension collects queued orders here. Handing them over clears the
+  // queue, so a slow consumer cannot replay stale orders later.
+  if (url.pathname === '/orders' && req.method === 'GET') {
+    cors(res);
+    execution.tick();
+    const orders = execution.armed ? execution.drain() : [];
+    res.writeHead(200, { 'content-type': 'application/json' }).end(
+      JSON.stringify({ armed: execution.armed, strategyId: execution.strategyId, orders }),
+    );
+    return;
+  }
+
+  if (url.pathname === '/orders/ack' && req.method === 'POST') {
+    cors(res);
+    try {
+      const { results } = JSON.parse(await readBody(req, 64 * 1024));
+      execution.acknowledge(results ?? []);
+      for (const r of results ?? []) {
+        log(r.ok ? `order sent ${r.id}` : `ORDER FAILED ${r.id}: ${r.error}`);
+        broadcast({ t: 'order', stage: r.ok ? 'sent' : 'failed', id: r.id, error: r.error });
+      }
+      broadcast(strategyEvent());
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true }));
     } catch (err) {
       res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: String(err.message) }));
     }
@@ -358,6 +492,7 @@ function snapshot() {
     security: state.security,
     selected,
     strategies: board.summaries,
+    execution: execution.status,
     clock: state.clock,
     total: state.total,
     session: state.session,

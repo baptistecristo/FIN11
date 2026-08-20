@@ -16,3 +16,27 @@ window.addEventListener('message', (event) => {
     /* extension context invalidated */
   }
 });
+
+// Execution bridge. Orders come from the service worker (the only context that
+// may reach the hub) and go to execute.js in the page world; results come back
+// the same way. The relay itself validates nothing: both ends do that.
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.__ftsExec !== TAG) return false;
+  try {
+    window.postMessage({ ...message }, '*');
+  } catch {
+    /* page went away */
+  }
+  return false;
+});
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+  const payload = event.data;
+  if (!payload || payload.__ftsExecResult !== TAG) return;
+  try {
+    chrome.runtime.sendMessage({ type: 'execResult', payload })?.catch?.(() => {});
+  } catch {
+    /* extension context invalidated */
+  }
+});

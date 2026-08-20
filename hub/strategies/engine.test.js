@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { StrategyBoard, StrategyRunner, Portfolio } from './engine.js';
+import { StrategyBoard, StrategyRunner, Portfolio, OPENING_BOTTLES, OPENING_CASH } from './engine.js';
 
 // A strategy that emits whatever the test hands it, once.
 function scripted(intents, id = 'test') {
@@ -166,13 +166,45 @@ test('a later account update does not re-seed a running portfolio', () => {
   assert.equal(board.runners[0].portfolio.cash, 500);
 });
 
-test('a new period resets the comparison', () => {
+test('a new period resets the comparison and seeds from the opening hand', () => {
   const board = new StrategyBoard([scripted([], 'a')]);
   board.handle({ t: 'account', cash: 0, position: 20, vt: 5 });
   board.runners[0].portfolio.record('sell', 5, 100, 2000, 5);
   board.handle({ t: 'session', state: 'start', total: 3000 });
-  assert.equal(board.runners[0].portfolio.seeded, false);
-  assert.equal(board.runners[0].portfolio.fills.length, 0);
+
+  const p = board.runners[0].portfolio;
+  assert.equal(p.fills.length, 0);
+  // Seeded immediately rather than waiting for an account message, so the
+  // strategies are running from the first tick of the session.
+  assert.equal(p.seeded, true);
+  assert.equal(p.position, OPENING_BOTTLES);
+  assert.equal(p.cash, OPENING_CASH);
+});
+
+test('a price-improving resting order fills at its own price', () => {
+  // Posting the best bid puts you at the front of the queue there, so a print
+  // that reaches your price fills you. Requiring a through-print would mean a
+  // price-improving quote never fills at all.
+  const runner = new StrategyRunner(scripted([{ kind: 'make', side: 'buy', qty: 5, price: 5000 }]));
+  runner.seed(100000, 0);
+  const m = market({ best: { bid: { price: 4900, qty: 10 }, ask: { price: 5100, qty: 10 } } });
+  runner.step({ t: 'clock', clock: 2000 }, m);
+  runner.step({ t: 'trade', price: 5000, qty: 20, tick: -1 }, m);
+  assert.equal(runner.portfolio.fills.at(-1).qty, 5);
+  assert.equal(runner.portfolio.position, 5);
+});
+
+test('a resting order merely matching the best still needs a through-print', () => {
+  const runner = new StrategyRunner(scripted([{ kind: 'make', side: 'buy', qty: 5, price: 4900 }]));
+  runner.seed(100000, 0);
+  const m = market({ best: { bid: { price: 4900, qty: 10 }, ask: { price: 5100, qty: 10 } } });
+  runner.step({ t: 'clock', clock: 2000 }, m);
+  // Behind the queue at 4,900: a print there does not reach us.
+  runner.step({ t: 'trade', price: 4900, qty: 20, tick: -1 }, m);
+  assert.equal(runner.portfolio.fills.length, 0);
+  // Through it, and we fill.
+  runner.step({ t: 'trade', price: 4800, qty: 20, tick: -1 }, m);
+  assert.equal(runner.portfolio.fills.at(-1).qty, 5);
 });
 
 test('the sparkline keeps one point per clock unit', () => {

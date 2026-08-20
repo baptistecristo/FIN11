@@ -19,6 +19,8 @@ const el = {
   fillCount: $('fill-count'),
   frames: $('frames'), notice: $('notice'),
   stratList: $('strategies'), stratYou: $('strat-you-gain'),
+  exec: $('exec'), execLabel: $('exec-label'), execCount: $('exec-count'),
+  execBtn: $('exec-btn'), execNote: $('exec-note'), execFooter: $('exec-footer'),
 };
 el.countdownBox = el.countdown.closest('.acct');
 
@@ -39,7 +41,7 @@ const state = {
   cash: null, position: null, vt: null,
   best: { bid: null, ask: null },
   points: [], myfills: [],
-  strategies: [], selected: null,
+  strategies: [], selected: null, execution: { armed: false },
   lastPrice: null, lastTick: 0,
 };
 
@@ -250,6 +252,12 @@ function paintAccount() {
 
 // Selecting is optimistic locally; the hub confirms and re-broadcasts.
 async function chooseStrategy(id) {
+  // Switching away from an armed strategy stops sending; the hub enforces the
+  // same thing, this just keeps the screen honest immediately.
+  if (state.execution?.armed && id !== state.execution.strategyId) {
+    state.execution = { ...state.execution, armed: false };
+  }
+  armPending = false;
   state.selected = id;
   schedulePanels();
   try {
@@ -265,6 +273,122 @@ async function chooseStrategy(id) {
 }
 
 initStrategies(chooseStrategy);
+
+// ---------------------------------------------------------------- arming
+
+// How long a single arming lasts. Short on purpose: re-arming is cheap, and a
+// forgotten armed session is not.
+const ARM_MINUTES = 10;
+
+async function setArmed(on) {
+  try {
+    const res = await fetch(on ? '/arm' : '/disarm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(on ? { strategyId: state.selected, ttlMs: ARM_MINUTES * 60_000 } : {}),
+    });
+    const body = await res.json();
+    if (!body.ok) throw new Error(body.error ?? 'refused');
+    if (body.execution) state.execution = body.execution;
+    el.notice.textContent = '';
+  } catch (err) {
+    el.notice.textContent = `Could not change arming: ${err.message}`;
+  }
+  schedulePanels();
+}
+
+// Arming takes two deliberate clicks. No confirm() dialog: a blocking dialog
+// freezes the window it belongs to, which is the last thing you want on the
+// screen you are watching the market through.
+let armPending = false;
+let armPendingTimer = null;
+
+function clearArmPending() {
+  armPending = false;
+  if (armPendingTimer) clearTimeout(armPendingTimer);
+  armPendingTimer = null;
+  schedulePanels();
+}
+
+el.execBtn.addEventListener('click', () => {
+  if (state.execution.armed) {
+    setArmed(false);
+    return;
+  }
+  if (!state.selected) return;
+
+  if (!armPending) {
+    armPending = true;
+    // The offer lapses on its own so a stray click cannot be completed later.
+    armPendingTimer = setTimeout(clearArmPending, 6000);
+    schedulePanels();
+    return;
+  }
+  clearArmPending();
+  setArmed(true);
+});
+
+// Switching: number keys pick a strategy, 0 clears. Quick enough to compare
+// them while the market runs.
+window.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === '0') {
+    chooseStrategy(null);
+    return;
+  }
+  const index = Number(e.key);
+  if (!Number.isInteger(index) || index < 1 || index > state.strategies.length) return;
+  const target = state.strategies[index - 1];
+  if (target) chooseStrategy(state.selected === target.id ? null : target.id);
+});
+
+// A kill switch that works wherever the focus happens to be.
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (armPending) clearArmPending();
+  if (state.execution.armed) setArmed(false);
+});
+
+function paintExecution() {
+  const ex = state.execution ?? { armed: false };
+  el.exec.dataset.state = ex.armed ? 'armed' : 'off';
+  // The footer must state what is true right now. A stale "cannot place orders"
+  // is worse than saying nothing.
+  el.execFooter.textContent = ex.armed ? 'ARMED — SENDING ORDERS' : 'Not sending orders';
+  el.execFooter.style.color = ex.armed ? 'var(--down)' : '';
+  el.execFooter.style.fontWeight = ex.armed ? '700' : '';
+
+  if (ex.armed) {
+    const left = ex.expiresAt ? Math.max(0, Math.round((ex.expiresAt - Date.now()) / 1000)) : null;
+    const name = state.strategies.find((s) => s.id === ex.strategyId)?.name ?? ex.strategyId;
+    el.execLabel.textContent = `SENDING ORDERS — ${name}`;
+    el.execCount.textContent = left === null ? '' : `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left`;
+    el.execBtn.disabled = false;
+    el.execBtn.textContent = 'STOP — disarm now';
+    el.execNote.textContent = `${ex.sent} sent, ${ex.remaining} allowed. Press Esc to stop.`;
+    return;
+  }
+
+  el.execLabel.textContent = 'Not sending orders';
+  el.execCount.textContent = ex.sent ? `${ex.sent} sent this session` : '';
+  el.execBtn.disabled = !state.selected;
+
+  if (armPending && state.selected) {
+    const name = state.strategies.find((s) => s.id === state.selected)?.name ?? state.selected;
+    el.exec.dataset.state = 'confirm';
+    el.execBtn.textContent = `Confirm — arm ${name}`;
+    el.execNote.textContent =
+      `Places real sell orders for ${ARM_MINUTES} minutes, and only while the extension ` +
+      'is armed too. Click again to confirm.';
+    return;
+  }
+
+  el.execBtn.textContent = state.selected ? 'Arm order sending' : 'Select a strategy first';
+  el.execNote.textContent = ex.lastError
+    ? `Last problem: ${ex.lastError}`
+    : 'Sending also needs the extension armed from its own popup. Press Esc to stop.';
+}
+
 
 function paintTopOfBook() {
   const show = (q) => (q ? `${fmt(q.price)} × ${q.qty ?? '?'}  ${q.trader ?? 'unnamed'}` : '—');
@@ -325,6 +449,7 @@ const panels = [
   ['book', paintTopOfBook],
   ['last', paintLast],
   ['strategies', () => paintStrategies(state, { list: el.stratList, you: el.stratYou }, fmt)],
+  ['execution', paintExecution],
 ];
 
 let panelsQueued = false;
@@ -359,6 +484,7 @@ function applySnapshot(snap) {
     best: snap.best || { bid: null, ask: null },
     strategies: snap.strategies || [],
     selected: snap.selected ?? null,
+    execution: snap.execution || { armed: false },
     myfills: snap.myfills || [],
   });
   // The curve is the fills, so it rebuilds straight from the trade history.
@@ -387,6 +513,10 @@ function apply(event) {
     case 'strategies':
       state.strategies = event.board;
       state.selected = event.selected;
+      if (event.execution) state.execution = event.execution;
+      break;
+    case 'order':
+      if (event.stage === 'failed') el.notice.textContent = `Order failed: ${event.error}`;
       break;
     case 'status':
       state.connected = event.connected;

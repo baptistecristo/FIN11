@@ -1,9 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "FTS Live Tape (capture)",
-  "version": "1.0.0",
-  "description": "Read-only capture of the FTS Web Trader feed for the local live tape viewer. Never places orders.",
-  "permissions": ["storage"],
+  "name": "FTS Live Tape",
+  "version": "2.0.0",
+  "description": "Captures the FTS Web Trader feed for the local viewer. Can also place sell orders, but only while armed here AND in the viewer.",
+  "permissions": [
+    "storage"
+  ],
   "host_permissions": [
     "http://127.0.0.1:8787/*",
     "http://localhost:8787/*"
@@ -26,7 +28,10 @@
         "http://www.ftswebmarket.com/*",
         "http://95.217.196.212/*"
       ],
-      "js": ["inject.js"],
+      "js": [
+        "inject.js",
+        "execute.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": true
@@ -41,7 +46,9 @@
         "http://www.ftswebmarket.com/*",
         "http://95.217.196.212/*"
       ],
-      "js": ["relay.js"],
+      "js": [
+        "relay.js"
+      ],
       "run_at": "document_start",
       "world": "ISOLATED",
       "all_frames": true

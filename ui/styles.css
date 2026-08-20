@@ -616,3 +616,90 @@ main > section { min-width: 0; min-height: 0; }
 }
 
 .strat-you b { font-size: 14px; font-weight: 600; color: var(--ink); }
+
+/* ---------------------------------------------------------------- execution */
+
+/* Deliberately loud when live. Anyone glancing at this screen has to be able to
+   tell in one look whether it is placing orders. */
+.exec {
+  padding: 9px 12px 10px;
+  border-top: 1px solid var(--rule);
+  background: var(--chrome);
+}
+
+.exec-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.exec-label { font-size: 11px; font-weight: 600; color: var(--ink-mid); }
+.exec-count { font-size: 11px; color: var(--ink-dim); }
+
+.exec-btn {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  color: var(--ink-mid);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.exec-btn:disabled { color: var(--ink-dim); cursor: default; }
+.exec-btn:not(:disabled):hover { border-color: var(--down); color: var(--down); }
+
+.exec-note { margin: 6px 0 0; font-size: 10px; color: var(--ink-dim); line-height: 1.35; }
+
+.exec[data-state="armed"] {
+  background: #fdeceb;
+  box-shadow: inset 0 0 0 2px var(--down);
+}
+
+.exec[data-state="armed"] .exec-label,
+.exec[data-state="armed"] .exec-note { color: var(--down); }
+
+.exec[data-state="armed"] .exec-btn {
+  background: var(--down);
+  border-color: var(--down);
+  color: #fff;
+}
+
+.exec[data-state="confirm"] { background: #fff6e5; box-shadow: inset 0 0 0 2px #b26a00; }
+.exec[data-state="confirm"] .exec-label,
+.exec[data-state="confirm"] .exec-note { color: #8a5200; }
+.exec[data-state="confirm"] .exec-btn { background: #b26a00; border-color: #b26a00; color: #fff; }
+
+/* Shortcut hint: number keys switch strategies. */
+.strat .key {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--rule);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--ink-dim);
+}
+
+.strat.is-on .key { border-color: var(--blue); color: var(--blue); }
+
+/* Four strategies have to fit without scrolling: comparing them at a glance is
+   the whole point of the panel. */
+.strat { padding: 7px 12px 8px; }
+.strat .blurb {
+  margin: 2px 0 4px;
+  font-size: 10px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.strat .gain { font-size: 15px; }
+.strat canvas { height: 20px; margin: 4px 0 3px; }
+.strat .use { margin-top: 5px; padding: 3px; }
+.strat:not(.is-on) .use { display: none; }

@@ -13,6 +13,13 @@
 
 const CAP = 25000;
 
+// The hand every trader is dealt: about 20 bottles and no cash, borrowing at
+// zero interest. Used to seed the paper portfolios at the opening bell so they
+// are running from the first message rather than from whenever the account
+// first reports.
+export const OPENING_BOTTLES = 20;
+export const OPENING_CASH = 0;
+
 export class Portfolio {
   constructor() {
     this.cash = 0;
@@ -174,9 +181,26 @@ export class StrategyRunner {
     const survivors = [];
 
     for (const order of p.resting) {
-      const through =
-        order.side === 'sell' ? trade.price > order.price : trade.price < order.price;
-      if (!through || remaining <= 0) {
+      // Queue position decides whether a print at your own price fills you.
+      //
+      // An order that betters the best quote is alone at the front, so a print
+      // that reaches it fills it. An order merely matching the best is behind
+      // whatever was already resting there, and only fills once the market
+      // trades through. Requiring a through-print in both cases would mean a
+      // price-improving quote never fills at all, which is wrong and would
+      // understate any strategy that works by posting the best price.
+      const best = order.side === 'sell' ? market.best.ask : market.best.bid;
+      const improves =
+        best && Number.isFinite(best.price)
+          ? (order.side === 'sell' ? order.price < best.price : order.price > best.price)
+          : true;
+
+      const reached =
+        order.side === 'sell'
+          ? improves ? trade.price >= order.price : trade.price > order.price
+          : improves ? trade.price <= order.price : trade.price < order.price;
+
+      if (!reached || remaining <= 0) {
         survivors.push(order);
         continue;
       }
@@ -243,8 +267,14 @@ export class StrategyBoard {
         break;
       case 'session':
         if (event.total != null) m.total = event.total;
-        // A fresh period means the comparison starts over.
-        if (event.state === 'start') this.reset();
+        if (event.state === 'start') {
+          // A fresh period starts the comparison over, and seeds immediately on
+          // the standard hand rather than waiting for the first account
+          // message. Otherwise the strategies miss the opening minutes, which
+          // is exactly where an accumulating strategy does its work.
+          this.reset();
+          for (const r of this.runners) r.seed(OPENING_CASH, OPENING_BOTTLES);
+        }
         break;
       case 'quote':
         m.best[event.side] = event.price === null ? null : { price: event.price, qty: event.qty };
