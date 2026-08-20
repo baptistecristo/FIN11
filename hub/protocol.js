@@ -73,9 +73,36 @@ export class Tracker {
     this.security = null;
     this.best = { bid: null, ask: null };
     this.last = null;
+    // Which security this tracker is following, and how many messages for other
+    // securities it has thrown away. See sameSecurity().
+    this.isno = null;
+    this.ignored = 0;
     // A fill moves cash and position, but they arrive as two separate messages.
     // Hold the pre-move values until both legs land, then reconcile in flush().
     this.pending = null;
+  }
+
+  // The FIN11 case trades one security, so every quote that arrives is a quote
+  // in the only book there is. The B02 demo market — the one the README tells
+  // you to rehearse on — trades four, and interleaves their quotes on the same
+  // socket. Without this check the book becomes a blend of all of them: on the
+  // live demo, security 3's bid of 88.70 landed against security 4's offer of
+  // 84.97, a crossed book of 3.73 that existed in nothing but our own state.
+  // The sniper takes crossed books.
+  //
+  // So the tracker follows whichever security it hears from first and counts
+  // the rest. A message with no isno at all is not filtered, because the
+  // account and clock messages carry none and are not per-security anyway.
+  sameSecurity(msg) {
+    const isno = num(msg.isno);
+    if (isno === null) return true;
+    if (this.isno === null) {
+      this.isno = isno;
+      return true;
+    }
+    if (this.isno === isno) return true;
+    this.ignored += 1;
+    return false;
   }
 
   // Returns the events produced by one message.
@@ -83,6 +110,18 @@ export class Tracker {
     const header = msg && msg.header;
     if (!header) return [];
     const at = this.clock;
+
+    // Only the market-data headers are per-security; everything else is either
+    // about the session or about your account.
+    if (
+      (header === 'bestbid' ||
+        header === 'bestask' ||
+        header === 'lasttrade' ||
+        header === 'bidasklast') &&
+      !this.sameSecurity(msg)
+    ) {
+      return [];
+    }
 
     switch (header) {
       case 'time': {

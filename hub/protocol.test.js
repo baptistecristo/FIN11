@@ -314,3 +314,49 @@ test('a locked market falls back to the tick, and reports nobody when neutral', 
   const [flat] = only(feed(tr, [{ header: 'lasttrade', isno: 1, price: '25,000', lastTick: '0' }]), 'trade');
   assert.equal(flat.restingTrader, null);
 });
+
+// A market with more than one security -----------------------------------------
+
+test('quotes for another security do not land in this book', () => {
+  // These are the real frames off the live B02 demo market, which trades four
+  // securities and interleaves their quotes on one socket. Blend them and
+  // security 3's bid of 88.70 sits against security 4's offer of 84.97 — a
+  // crossed book of 3.73 that exists nowhere but in our own state, on the very
+  // market the README tells you to rehearse on. The sniper takes crossed books.
+  const tr = new Tracker();
+  feed(tr, [
+    { header: 'bestbid', isno: '4', price: '78.47', qty: '35', displayName: 'Trader 39' },
+    { header: 'bestask', isno: '4', price: '84.97', qty: '100', displayName: 'Trader 2' },
+  ]);
+  const events = feed(tr, [
+    { header: 'bestbid', isno: '3', price: '88.70', qty: '80', displayName: 'Trader 31' },
+    { header: 'bestask', isno: '3', price: '90.00', qty: '10480', displayName: 'Trader 58' },
+  ]);
+  assert.deepEqual(only(events, 'quote'), [], 'emitted a quote for a security we are not following');
+  assert.equal(tr.best.bid.price, 78.47);
+  assert.equal(tr.best.ask.price, 84.97);
+  assert.ok(tr.best.bid.price < tr.best.ask.price, 'book crossed itself across securities');
+  assert.equal(tr.isno, 4);
+  assert.equal(tr.ignored, 2);
+});
+
+test('a feed with one security is followed exactly as before', () => {
+  const tr = new Tracker();
+  const events = feed(tr, [
+    { header: 'bestbid', isno: 1, price: '24,000', qty: '189', displayName: 'a.trader' },
+    { header: 'bestask', isno: 1, price: '24,999', qty: '1', displayName: 'b.trader' },
+    { header: 'lasttrade', isno: 1, price: '24,000', qty: '1', lastTick: '0' },
+  ]);
+  assert.equal(only(events, 'quote').length, 2);
+  assert.equal(only(events, 'trade').length, 1);
+  assert.equal(tr.ignored, 0);
+});
+
+test('messages carrying no security id are never filtered', () => {
+  // The clock and the account are not per-security and carry no isno.
+  const tr = new Tracker();
+  feed(tr, [{ header: 'bestbid', isno: '4', price: '78.47', qty: '35' }]);
+  const events = feed(tr, [{ header: 'time', msg: '1839' }]);
+  assert.equal(only(events, 'clock').length, 1);
+  assert.equal(tr.ignored, 0);
+});

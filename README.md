@@ -333,7 +333,22 @@ feeds a synthetic session that includes fills of your own.
 
 Before a real session, run it once against the live B02 demo market ("Connect to B02
 Demo" on the FTS site). That is the only check that exercises the real feed end to end,
-and it touches nothing in the ranked competition.
+and it touches nothing in the ranked competition. It needs the extension loaded — the
+page cannot reach `127.0.0.1` itself, which is the whole reason the relay goes through
+the service worker.
+
+**The demo trades four securities on one socket, and the FIN11 case trades one.** That
+difference found a real bug: the tracker used to accept every `bestbid` and `bestask`
+regardless of which security it belonged to, so on the live demo security 3's bid of
+88.70 landed against security 4's offer of 84.97 — a crossed book of 3.73 that existed
+nowhere but in our own state, on a market the sniper is allowed to be armed on. The
+tracker now follows whichever security it hears from first and counts the rest, which
+you can see as `ignored` in its state. A single-security feed is unaffected.
+
+It is worth knowing what the demo can and cannot tell you. It proves the socket is where
+we think it is, that frames arrive batched, that every header is one the parser knows,
+and that nothing throws on real decimal prices. It cannot tell you anything about the
+strategies, because it is not the genie market and has no 25,000 cap.
 
 </details>
 
