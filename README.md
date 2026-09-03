@@ -79,4 +79,14 @@ Reasoning behind each strategy, and the full test results, are in
 npm test
 ```
 
+Before the first run, load `extension\` once from `chrome://extensions` — Developer mode,
+then **Load unpacked**. The viewer has no feed without it. Then trade in your normal
+browser as usual, and the extension mirrors the feed to the hub.
+
+Outside a session you can replay a saved capture through the same viewer:
+
+```powershell
+.\scripts\start.ps1 -Replay <file> -Speed 40
+```
+
 Node 20+, no dependencies.
