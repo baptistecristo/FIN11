@@ -80,11 +80,11 @@ free, and the installer's default options are fine.
 1. **Get the code.** Click the green **Code** button at the top of this page, choose
    **Download ZIP**, and unzip it somewhere you'll find again.
 
-2. **Give Chrome the add-on.** The viewer can't see the market on its own. A small
-   add-on passes what your browser sees over to it. Open a new tab, go to
-   `chrome://extensions`, turn on **Developer mode** at the top right, click **Load
-   unpacked**, and pick the `extension` folder from the unzipped code. You only ever do
-   this once.
+2. **Add the extension to Chrome.** The viewer can't see the market by itself. A small
+   piece of software, called an extension, passes what your browser sees over to it.
+   Open a new tab, go to `chrome://extensions`, turn on **Developer mode** at the top
+   right, click **Load unpacked**, and pick the `extension` folder from the unzipped
+   code. You only do this once.
 
 3. **Start it.** In File Explorer, right-click the unzipped folder and choose **Open in
    Terminal**, then paste this and press Enter:
@@ -105,7 +105,8 @@ free, and the installer's default options are fine.
 5. **Watch it fill up.** Every trade in the market appears on the left as it happens, the
    line on the right is the price, and the panel below runs five different selling plans
    against your real position at once, scoring each one. Press **1** to **5** to see what
-   each would be doing. Nothing places an order unless you switch it on.
+   each would be doing. It places no orders of its own until you arm it, in the extension
+   and in the viewer both.
 
 ### Or have Claude Code or Codex do it with you
 
@@ -116,8 +117,8 @@ I've just downloaded this project and I don't know how any of it works.
 
 1. Check whether I have everything I need to run it. If something's missing, tell me
    where to get it in plain language.
-2. Walk me through loading the browser add-on in the `extension` folder, one click at a
-   time. I've never installed one this way before, so don't assume I know the words.
+2. Walk me through loading the browser extension in the `extension` folder, one click at
+   a time. I've never installed one this way before, so don't assume I know the words.
 3. Start the project for me and tell me when it's ready.
 4. Then explain what I'm looking at in the window that opened: what the list on the left
    is, what the line on the right means, and what the five numbered plans are each
@@ -126,10 +127,10 @@ I've just downloaded this project and I don't know how any of it works.
 Explain as you go, and stop and ask me before anything that would place a real order.
 ```
 
-It can do steps 1, 3 and 4 for you. Step 2 is clicks in your own browser that it can't
-make for you, so it will talk you through those.
+It can do steps 1, 3 and 4 for you. Step 2 is clicks inside your own browser that it
+can't make for you, so it will talk you through those instead.
 
 ---
 
-Already have a saved recording? `.\scripts\start.ps1 -Replay <file> -Speed 40` plays it
-back through the same viewer. `npm test` runs the test suite.
+To play back a recording you already have, run `.\scripts\start.ps1 -Replay <file>
+-Speed 40` and it runs through the same viewer. `npm test` runs the test suite.
