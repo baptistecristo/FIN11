@@ -74,22 +74,62 @@ Reasoning behind each strategy, and the full test results, are in
 
 ## Running it
 
-Node 20+, no dependencies. `npm test` runs the suite.
+You need a Windows PC with Chrome, and [Node.js](https://nodejs.org) installed. Node is
+free, and the installer's default options are fine.
 
-1. **Load the extension, once.** `chrome://extensions` → Developer mode → **Load
-   unpacked** → select `extension\`. Nothing reaches the viewer without it.
-2. **Start the hub.** `.\scripts\start.ps1` opens the viewer in its own window, so it
-   sits beside the trading tab rather than on top of the order ticket.
-3. **Connect to a market.** In your normal browser, open
-   [ftswebtrader.com](http://ftswebtrader.com) and log in to the session as usual. If no
-   session is running, click **Connect to Demo** instead — it joins the B02 demo market
-   as `Trader <random>`, which behaves the same way and never touches the ranked
-   competition.
-4. **Trade as usual.** The tape fills, the curve builds, and all five strategies score
-   from your real position. Press **1-5** to switch between them.
+1. **Get the code.** Click the green **Code** button at the top of this page, choose
+   **Download ZIP**, and unzip it somewhere you'll find again.
 
-To watch a saved capture instead of connecting to anything:
+2. **Give Chrome the add-on.** The viewer can't see the market on its own. A small
+   add-on passes what your browser sees over to it. Open a new tab, go to
+   `chrome://extensions`, turn on **Developer mode** at the top right, click **Load
+   unpacked**, and pick the `extension` folder from the unzipped code. You only ever do
+   this once.
 
-```powershell
-.\scripts\start.ps1 -Replay <file> -Speed 40
+3. **Start it.** In File Explorer, right-click the unzipped folder and choose **Open in
+   Terminal**, then paste this and press Enter:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1
+   ```
+
+   Windows blocks downloaded scripts by default, which is what the long first half of
+   that line is for. A window opens with an empty tape and an empty chart. That window
+   is the viewer, and it stays empty until you connect to a market.
+
+4. **Open the market.** In your normal browser, go to
+   [ftswebtrader.com](http://ftswebtrader.com). If your session is running, log in the
+   way you normally would. If it isn't, click **Connect to Demo**. That drops you into a
+   practice market which works the same way and has nothing to do with anyone's grade.
+
+5. **Watch it fill up.** Every trade in the market appears on the left as it happens, the
+   line on the right is the price, and the panel below runs five different selling plans
+   against your real position at once, scoring each one. Press **1** to **5** to see what
+   each would be doing. Nothing places an order unless you switch it on.
+
+### Or have Claude Code or Codex do it with you
+
+Open the unzipped folder in Claude Code (or Codex) and paste this:
+
+```text
+I've just downloaded this project and I don't know how any of it works.
+
+1. Check whether I have everything I need to run it. If something's missing, tell me
+   where to get it in plain language.
+2. Walk me through loading the browser add-on in the `extension` folder, one click at a
+   time. I've never installed one this way before, so don't assume I know the words.
+3. Start the project for me and tell me when it's ready.
+4. Then explain what I'm looking at in the window that opened: what the list on the left
+   is, what the line on the right means, and what the five numbered plans are each
+   trying to do differently.
+
+Explain as you go, and stop and ask me before anything that would place a real order.
 ```
+
+It can do steps 1, 3 and 4 for you. Step 2 is clicks in your own browser that it can't
+make for you, so it will talk you through those.
+
+---
+
+Already have a saved recording? `.\scripts\start.ps1 -Replay <file> -Speed 40` plays it
+back through the same viewer. `npm test` runs the test suite.
