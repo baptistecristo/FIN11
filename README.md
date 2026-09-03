@@ -74,19 +74,22 @@ Reasoning behind each strategy, and the full test results, are in
 
 ## Running it
 
-```powershell
-.\scripts\start.ps1
-npm test
-```
+Node 20+, no dependencies. `npm test` runs the suite.
 
-Before the first run, load `extension\` once from `chrome://extensions` — Developer mode,
-then **Load unpacked**. The viewer has no feed without it. Then trade in your normal
-browser as usual, and the extension mirrors the feed to the hub.
+1. **Load the extension, once.** `chrome://extensions` → Developer mode → **Load
+   unpacked** → select `extension\`. Nothing reaches the viewer without it.
+2. **Start the hub.** `.\scripts\start.ps1` opens the viewer in its own window, so it
+   sits beside the trading tab rather than on top of the order ticket.
+3. **Connect to a market.** In your normal browser, open
+   [ftswebtrader.com](http://ftswebtrader.com) and log in to the session as usual. If no
+   session is running, click **Connect to Demo** instead — it joins the B02 demo market
+   as `Trader <random>`, which behaves the same way and never touches the ranked
+   competition.
+4. **Trade as usual.** The tape fills, the curve builds, and all five strategies score
+   from your real position. Press **1-5** to switch between them.
 
-Outside a session you can replay a saved capture through the same viewer:
+To watch a saved capture instead of connecting to anything:
 
 ```powershell
 .\scripts\start.ps1 -Replay <file> -Speed 40
 ```
-
-Node 20+, no dependencies.
